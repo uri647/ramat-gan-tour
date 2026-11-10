@@ -54,24 +54,37 @@ function dayStats() { const d = S.progress.days[today()] || (S.progress.days[tod
 
 // ================= data loading =================
 const HW = '^(trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street|road)$';
-const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://overpass.private.coffee/api/interpreter'];
-async function overpass(q, status) {
+const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
+async function overpass(q, status, timeoutMs = 90000) {
   let lastErr;
   for (const url of OVERPASS) {
+    const c = new AbortController(); const t = setTimeout(() => c.abort(), timeoutMs);
     try {
       status && status(`מוריד נתונים… (${new URL(url).host})`);
-      const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+      const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: c.signal });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return await r.json();
-    } catch (e) { lastErr = e; }
+    } catch (e) { lastErr = e.name === 'AbortError' ? new Error('השרת לא ענה בזמן') : e; }
+    finally { clearTimeout(t); }
   }
   throw lastErr;
+}
+// street data baked into the site at build time (no external server needed)
+async function loadPrebuilt(city) {
+  try {
+    const m = await (await fetch('data/cities.json', { cache: 'no-cache' })).json();
+    if (!m[city]) return null;
+    const d = await (await fetch('data/' + m[city])).json();
+    const g = C.deserializeGraph(d);
+    await idb.set('graph:' + city, d);
+    return g;
+  } catch { return null; }
 }
 async function downloadCity(city, status) {
   const esc = city.replace(/"/g, '\\"');
   const q1 = `[out:json][timeout:120];area["boundary"="administrative"]["name"="${esc}"]->.a;way(area.a)["highway"~"${HW}"]["access"!~"^(no|private)$"]["motor_vehicle"!~"^(no|private)$"]["area"!="yes"];out ids bb;`;
   status('מחפש את גבולות העיר…');
-  const r1 = await overpass(q1, status);
+  const r1 = await overpass(q1, status, 60000);
   const ways = r1.elements.filter((e) => e.type === 'way');
   if (!ways.length) throw new Error(`לא נמצאה עיר בשם "${city}" במפה`);
   const req = new Set(ways.map((w) => w.id));
@@ -80,7 +93,7 @@ async function downloadCity(city, status) {
   const B = 0.006;
   status(`נמצאו ${ways.length} רחובות. מוריד את המפה…`);
   const q2 = `[out:json][timeout:180];way(${s - B},${w - B},${n + B},${e + B})["highway"~"${HW}"]["access"!~"^(no|private)$"]["area"!="yes"];(._;>;);out body qt;`;
-  const r2 = await overpass(q2, status);
+  const r2 = await overpass(q2, status, 150000);
   status('בונה את רשת הרחובות…');
   await new Promise((r) => setTimeout(r, 30));
   const g = C.buildGraph(r2.elements, req);
@@ -578,7 +591,9 @@ $('loadCityBtn').addEventListener('click', async () => {
   const city = $('cityInput').value.trim(); if (!city) return;
   const btn = $('loadCityBtn'); btn.disabled = true;
   try {
-    const g = await downloadCity(city, (m) => { $('loadStatus').textContent = m; });
+    let g = S.forceDownload ? null : await loadPrebuilt(city);
+    S.forceDownload = false;
+    if (!g) g = await downloadCity(city, (m) => { $('loadStatus').textContent = m; });
     settings.city = city; saveSettings();
     S.g = g; loadProgress(); await loadProjects();
     if (map) { map.remove(); map = null; meMarker = null; flagMarker = null; }
@@ -609,7 +624,7 @@ $('stVoice').addEventListener('change', (e) => { settings.voice = e.target.check
 $('stSim').addEventListener('change', (e) => { settings.sim = e.target.checked; saveSettings(); });
 $('stSimSpeed').addEventListener('change', (e) => { settings.simSpeed = +e.target.value; saveSettings(); });
 $('stClose').addEventListener('click', () => { $('settingsSheet').classList.add('hidden'); renderHome(); });
-$('stReload').addEventListener('click', () => { $('settingsSheet').classList.add('hidden'); $('cityInput').value = settings.city; show('setup'); $('loadCityBtn').click(); });
+$('stReload').addEventListener('click', () => { S.forceDownload = true; $('settingsSheet').classList.add('hidden'); $('cityInput').value = settings.city; show('setup'); $('loadCityBtn').click(); });
 $('stCity').addEventListener('click', () => { $('settingsSheet').classList.add('hidden'); $('cityInput').value = ''; show('setup'); });
 $('stReset').addEventListener('click', (ev) => {
   const b = ev.currentTarget;
@@ -628,6 +643,8 @@ $('muteBtn').classList.toggle('off', !settings.voice);
       S.g = C.deserializeGraph(d); loadProgress(); await loadProjects();
       renderHome(); show('home'); return;
     }
+    const g = await loadPrebuilt(settings.city);
+    if (g) { S.g = g; loadProgress(); await loadProjects(); renderHome(); show('home'); return; }
   } catch (e) { console.error(e); }
   $('cityInput').value = settings.city;
   show('setup');

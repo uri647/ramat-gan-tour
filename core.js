@@ -153,11 +153,12 @@ export function finalizeGraph(g) {
   return g;
 }
 
+const r6 = (v) => Math.round(v * 1e6) / 1e6;
 export function serializeGraph(g) {
   return {
     v: 1, lat0: g.proj.lat0, lon0: g.proj.lon0,
-    nodes: g.nodes.map((n) => [n.lat, n.lon, n.osm]),
-    edges: g.edges.map((e) => [e.key, e.a, e.b, e.ll, e.name, e.dir, e.req ? 1 : 0, e.roundabout ? 1 : 0]),
+    nodes: g.nodes.map((n) => [r6(n.lat), r6(n.lon), n.osm]),
+    edges: g.edges.map((e) => [e.key, e.a, e.b, e.ll.map(([a, b]) => [r6(a), r6(b)]), e.name, e.dir, e.req ? 1 : 0, e.roundabout ? 1 : 0]),
   };
 }
 export function deserializeGraph(d) {
