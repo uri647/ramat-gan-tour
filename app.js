@@ -138,7 +138,7 @@ const COLORS = { todo: '#A3ADBD', done: '#16A34A', skip: '#F87171', plan: '#2563
 function initMap() {
   if (map) { setTimeout(() => map.invalidateSize(), 50); return; }
   map = L.map('map', { zoomControl: false, attributionControl: true, preferCanvas: true, rotate: true, rotateControl: false, touchRotate: false, shiftKeyRotate: false, pitchDrag: false, bearing: 0 });
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap', className: 'base-tiles' }).addTo(map);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap', className: 'base-tiles', updateWhenIdle: false, updateInterval: 150, keepBuffer: 6 }).addTo(map);
   const renderer = L.canvas({ padding: 0.5 });
   edgeLines = [];
   for (const e of S.g.reqEdges) {
@@ -172,32 +172,89 @@ function setFlag(p) {
   if (!p || !map) return;
   flagMarker = L.marker([p.lat, p.lon], { icon: L.divIcon({ className: '', iconSize: [26, 40], iconAnchor: [2, 38], html: '<svg width="26" height="40" viewBox="0 0 26 40"><line x1="2" y1="2" x2="2" y2="38" stroke="#0F172A" stroke-width="3" stroke-linecap="round"/><path d="M3 3 L24 10 L3 17 Z" fill="#DC2626"/></svg>' }), interactive: false }).addTo(map);
 }
-// heading smoothing (degrees, clockwise from north)
-function smoothHeading(h) {
-  if (h == null || isNaN(h)) return S.hdg ?? null;
-  if (S.hdg == null) return (S.hdg = h);
-  const d = ((h - S.hdg + 540) % 360) - 180;
-  S.hdg = (S.hdg + d * 0.45 + 360) % 360;
-  return S.hdg;
+// ================= smooth driving view (Waze-like) =================
+// GPS gives one position per second; we glide the marker between fixes on the road,
+// ease the map rotation, and move the map with cheap CSS transforms every frame.
+const A = { from: null, to: null, t0: 0, dur: 1000, disp: null, hdg: null, tgtHdg: null, lastFixT: 0, raf: 0, last: 0, dirty: false, lastEnd: 0, visC: null, visT: 0, el: null };
+function setTarget(x, y, hdgDeg) {
+  const now = performance.now();
+  const dur = A.lastFixT ? Math.max(250, Math.min(1600, now - A.lastFixT)) : 0;
+  A.lastFixT = now;
+  if (!A.disp || Math.hypot(x - A.disp[0], y - A.disp[1]) > 150) { A.disp = [x, y]; A.from = [x, y]; A.jump = true; }
+  else A.from = A.disp.slice();
+  A.to = [x, y]; A.t0 = now; A.dur = dur || 1;
+  if (hdgDeg != null && !isNaN(hdgDeg)) A.tgtHdg = hdgDeg;
+  if (!A.raf) { A.last = now; A.raf = requestAnimationFrame(frame); }
 }
-function updateMe(lat, lon, headingDeg) {
-  const hdg = smoothHeading(headingDeg);
-  const rotate = settings.headingUp && S.follow && hdg != null;
-  if (rotate) { try { map.setBearing((360 - hdg) % 360); } catch {} } // leaflet-rotate turns the map clockwise by the bearing
-  else if (!settings.headingUp && map.getBearing && map.getBearing() !== 0) { try { map.setBearing(0); } catch {} }
-  const bearing = map.getBearing ? map.getBearing() : 0;
-  const screenRot = hdg != null ? hdg + bearing : 0;
-  const html = `<div class="me-marker" style="transform:rotate(${screenRot}deg)"><div class="halo"></div>${hdg != null ? '<div class="arrow"></div>' : ''}<div class="dot"></div></div>`;
-  const icon = L.divIcon({ className: '', iconSize: [30, 30], iconAnchor: [15, 15], html });
-  if (!meMarker) meMarker = L.marker([lat, lon], { icon, interactive: false, zIndexOffset: 1000 }).addTo(map);
-  else { meMarker.setLatLng([lat, lon]); meMarker.setIcon(icon); }
+function stopAnim() { if (A.raf) cancelAnimationFrame(A.raf); A.raf = 0; A.disp = null; A.lastFixT = 0; A.hdg = null; A.tgtHdg = null; }
+function frame(now) {
+  A.raf = requestAnimationFrame(frame);
+  if (!map || !A.to) return;
+  const dt = Math.min(100, now - A.last); A.last = now;
+  const g = S.g;
+  // position: linear glide from the previous displayed point to the new fix
+  const t = Math.min(1, (now - A.t0) / A.dur);
+  A.disp = [A.from[0] + (A.to[0] - A.from[0]) * t, A.from[1] + (A.to[1] - A.from[1]) * t];
+  // heading: exponential ease along the shortest arc
+  if (A.tgtHdg != null) {
+    if (A.hdg == null) A.hdg = A.tgtHdg;
+    const d = ((A.tgtHdg - A.hdg + 540) % 360) - 180;
+    A.hdg = (A.hdg + d * (1 - Math.exp(-dt / 220)) + 360) % 360;
+  }
+  const ll = g.proj.toLL(A.disp[0], A.disp[1]);
+  // rotation
+  if (settings.headingUp && S.follow && A.hdg != null) {
+    const want = (360 - A.hdg) % 360, cur = map.getBearing();
+    if (Math.abs(((want - cur + 540) % 360) - 180) > 0.05) map.setBearing(want);
+  } else if (!settings.headingUp && map.getBearing() !== 0) map.setBearing(0);
+  // marker
+  if (!meMarker) {
+    const html = '<div class="me-marker"><div class="halo"></div><div class="arrow"></div><div class="dot"></div></div>';
+    meMarker = L.marker(ll, { icon: L.divIcon({ className: '', iconSize: [30, 30], iconAnchor: [15, 15], html }), interactive: false, zIndexOffset: 1000 }).addTo(map);
+    A.el = null;
+  } else meMarker.setLatLng(ll);
+  if (!A.el) A.el = meMarker.getElement() && meMarker.getElement().querySelector('.me-marker');
+  if (A.el) {
+    A.el.style.transform = `rotate(${((A.hdg ?? 0) + map.getBearing()) % 360}deg)`;
+    A.el.classList.toggle('nohdg', A.hdg == null);
+  }
+  // camera follow: keep the driver at a fixed screen point (lower part when heading-up)
   if (S.follow) {
-    const z = Math.max(map.getZoom(), 17);
-    map.setView([lat, lon], z, { animate: false });
-    // put the driver in the lower part of the screen so more road ahead is visible
-    if (rotate) map.panBy([0, -map.getSize().y * 0.08], { animate: false });
+    const size = map.getSize();
+    const panelTop = (document.querySelector('.nav-panel')?.getBoundingClientRect().top) || size.y;
+    const want = L.point(size.x / 2, settings.headingUp ? panelTop * 0.74 : panelTop * 0.5);
+    if (A.jump || map.getZoom() < 15) { map.setView(ll, Math.max(map.getZoom(), 17), { animate: false }); A.jump = false; }
+    const cp = map.latLngToContainerPoint(ll), off = cp.subtract(want);
+    if (Math.abs(off.x) > 400 || Math.abs(off.y) > 400) map.setView(ll, map.getZoom(), { animate: false });
+    else if (Math.abs(off.x) > 0.15 || Math.abs(off.y) > 0.15) { map._rawPanBy(off); map.fire('move'); A.dirty = true; }
+  }
+  // let tiles / street lines refresh a few times per second, not every frame
+  if (A.dirty && now - A.lastEnd > 450) { A.dirty = false; A.lastEnd = now; map.fire('moveend'); }
+  // only draw streets near the driver (keeps redraws cheap on the phone)
+  if (!A.visC || now - A.visT > 4000 || Math.hypot(A.disp[0] - A.visC[0], A.disp[1] - A.visC[1]) > 250) refreshVisibleEdges();
+}
+function refreshVisibleEdges() {
+  A.visC = A.disp.slice(); A.visT = performance.now();
+  const R = 1600;
+  for (const e of S.g.reqEdges) {
+    const l = edgeLines[e.id]; if (!l) continue;
+    const p = e.pts[0], q = e.pts[e.pts.length - 1];
+    const near = Math.min(Math.hypot(p[0] - A.visC[0], p[1] - A.visC[1]), Math.hypot(q[0] - A.visC[0], q[1] - A.visC[1])) < R;
+    if (near && !map.hasLayer(l)) l.addTo(map); else if (!near && map.hasLayer(l)) l.remove();
   }
 }
+// heading for the driver: road direction when on a street, else GPS / movement
+function driveHeading(m, fallback) {
+  if (m && m.segDir != null && m.fwd != null) {
+    let h = 90 - m.segDir * 180 / Math.PI; if (!m.fwd) h += 180;
+    return (h % 360 + 360) % 360;
+  }
+  return fallback;
+}
+function updateMe(lat, lon, headingDeg) { // compatibility: place marker at a raw position
+  const [x, y] = S.g.proj.toXY(lat, lon); setTarget(x, y, headingDeg);
+}
+
 function renderOrient() {
   $('orientBtn').classList.toggle('on', !!settings.headingUp);
   $('orientIcon').innerHTML = settings.headingUp
@@ -237,6 +294,7 @@ function stopNav() {
   if (S.watchId != null) { navigator.geolocation.clearWatch(S.watchId); S.watchId = null; }
   if (S.simTimer) { clearInterval(S.simTimer); S.simTimer = null; }
   releaseWake();
+  stopAnim();
   S.mode = 'idle';
   try { speechSynthesis.cancel(); } catch {}
 }
@@ -260,7 +318,9 @@ function onFix(lat, lon, acc, headingDeg, speed) {
   S.lastFix = { x, y, t: Date.now() }; S.lastLL = [lat, lon];
   let hdg = headingDeg;
   if (hdg == null && prev && Math.hypot(x - prev.x, y - prev.y) > 4) hdg = 90 - Math.atan2(y - prev.y, x - prev.x) * 180 / Math.PI;
-  updateMe(lat, lon, hdg);
+  const mm = r.match;
+  if (mm && mm.d < 25) setTarget(mm.qx, mm.qy, driveHeading(mm, hdg)); // glued to the road
+  else setTarget(x, y, hdg);
 
   if (prev && r.match) {
     const d = Math.hypot(x - prev.x, y - prev.y);
@@ -660,11 +720,11 @@ $('nearestBtn').addEventListener('click', () => startNav('cover'));
 $('pauseBtn').addEventListener('click', pauseHere);
 $('foundBtn').addEventListener('click', openProject);
 $('blockedBtn').addEventListener('click', skipNext);
-$('recenterBtn').addEventListener('click', () => { S.follow = true; if (S.lastLL) updateMe(S.lastLL[0], S.lastLL[1], null); });
+$('recenterBtn').addEventListener('click', () => { S.follow = true; A.jump = true; });
 $('orientBtn').addEventListener('click', () => {
   settings.headingUp = !settings.headingUp; saveSettings(); renderOrient();
   if (!settings.headingUp) { try { map.setBearing(0); } catch {} }
-  S.follow = true; if (S.lastLL) updateMe(S.lastLL[0], S.lastLL[1], null);
+  S.follow = true; A.jump = true;
   toast(settings.headingUp ? 'המפה מסתובבת לפי כיוון הנסיעה' : 'צפון למעלה');
 });
 renderOrient();

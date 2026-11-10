@@ -121,3 +121,6 @@ button,input,select,textarea{font:inherit;color:inherit}
 /* soften the base map so the colored street lines stand out */
 .base-tiles{filter:saturate(.45) brightness(1.04) contrast(.92)}
 .icon-btn.on{border-color:#93C5FD}
+.me-marker{position:relative;will-change:transform}
+.me-marker.nohdg .arrow{display:none}
+.leaflet-map-pane{will-change:transform}

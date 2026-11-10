@@ -301,7 +301,7 @@ export class Matcher {
         if (fwd === null) fwd = p0 === 0;
       }
       if (this.cov.markRange(best.e, p0, best.pos)) newly.push(best.e);
-      this.last = { e: best.e, pos: best.pos, fwd, d: best.d, qx: best.qx, qy: best.qy };
+      this.last = { e: best.e, pos: best.pos, fwd, d: best.d, qx: best.qx, qy: best.qy, segDir: best.segDir };
     } else {
       this.last = null;
     }
