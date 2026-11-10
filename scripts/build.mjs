@@ -6,6 +6,7 @@ import { buildGraph, serializeGraph, HIGHWAY_RE } from '../core.js';
 
 const CITIES = [
   { name: 'רמת גן', areas: ['Ramat Gan, Israel'], file: 'ramat-gan.json' },
+  { name: 'פתח תקווה', areas: ['Petah Tikva, Israel'], file: 'petah-tikva.json' },
   // test area near home: the three Kfar Ganim neighbourhoods in Petah Tikva
   { name: 'כפר גנים (פתח תקווה)', areas: ['כפר גנים א, פתח תקווה', 'כפר גנים ב, פתח תקווה', 'כפר גנים ג, פתח תקווה'], radius: 550, file: 'kfar-ganim.json' },
 ];
