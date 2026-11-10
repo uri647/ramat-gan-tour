@@ -18,7 +18,7 @@ if (isMain) {
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out + '/data', { recursive: true });
 for (const f of readdirSync('.')) {
-  if (['dist', 'scripts', 'node_modules', '.git', '.vercel', 'vercel.json', 'package.json', 'README.md', '.gitignore'].includes(f)) continue;
+  if (['dist', 'scripts', 'api', 'node_modules', '.git', '.vercel', 'vercel.json', 'package.json', 'README.md', '.gitignore'].includes(f)) continue;
   cpSync(f, `${out}/${f}`, { recursive: true });
 }
 }

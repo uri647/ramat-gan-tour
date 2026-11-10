@@ -638,12 +638,14 @@ function vcardFor(p, contacts) {
   }).join('\r\n');
 }
 function openVcard(p, contacts) {
-  const list = contacts.filter((c) => c.name || c.phone); if (!list.length) return false;
-  const blob = new Blob([vcardFor(p, list)], { type: 'text/vcard;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = `${(list[0].name || 'contact').replace(/[^\p{L}\p{N} _-]/gu, '')}.vcf`;
+  const list = contacts.filter((c) => c && (c.name || c.phone)); if (!list.length) return false;
+  const c = list[0];
+  const name = (c.name || '').trim() || `${c.role || ''} ${p.street || ''}`.trim();
+  // A real URL opened in Safari gives the iPhone's own "Create New Contact" screen.
+  const url = `/api/vcard?name=${encodeURIComponent(name)}&phone=${encodeURIComponent(c.phone || '')}`;
+  const a = document.createElement('a'); a.href = url; a.target = '_blank'; a.rel = 'noopener';
   document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  if (list.length > 1) setTimeout(() => toast('נפתח איש הקשר הראשון. את השאר שומרים מרשימת הפרויקטים, בכפתור "שמור" ליד כל אחד', 4500), 600);
   return true;
 }
 function closeProject() { $('projectSheet').classList.add('hidden'); draft = null; }
