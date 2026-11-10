@@ -247,6 +247,16 @@
   </div>
 </div>
 
+<!-- ===== Photo viewer ===== -->
+<div id="viewer" class="viewer hidden" role="dialog" aria-label="תמונה">
+  <div id="viewerBox" class="viewer-box"><img id="viewerImg" alt="תמונת הפרויקט"></div>
+  <button class="viewer-btn close" id="viewerClose" aria-label="סגור">✕</button>
+  <button class="viewer-btn prev" id="viewerPrev" aria-label="התמונה הקודמת">‹</button>
+  <button class="viewer-btn next" id="viewerNext" aria-label="התמונה הבאה">›</button>
+  <div class="viewer-count" id="viewerCount"></div>
+  <div class="viewer-hint">לחיצה כפולה להגדלה</div>
+</div>
+
 <div id="toast" class="toast hidden"></div>
 
 <script src="vendor/leaflet.js"></script>

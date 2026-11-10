@@ -612,7 +612,7 @@ function renderDraft() {
       <input type="tel" placeholder="טלפון" value="${esc(c.phone)}" data-f="phone" inputmode="tel" autocomplete="off">
     </div>`).join('');
   const box = $('pjPhotos'); box.querySelectorAll('img').forEach((n) => n.remove());
-  for (const p of draft.photos) { const img = document.createElement('img'); img.className = 'thumb'; img.src = p; img.alt = 'תמונה של הפרויקט'; box.appendChild(img); }
+  draft.photos.forEach((p, k) => { const img = document.createElement('img'); img.className = 'thumb'; img.src = p; img.alt = 'תמונה של הפרויקט'; img.addEventListener('click', () => openViewer(draft.photos, k)); box.appendChild(img); });
 }
 $('pjStages').addEventListener('click', (ev) => { const b = ev.target.closest('[data-stage]'); if (!b) return; draft.stage = draft.stage === b.dataset.stage ? '' : b.dataset.stage; renderDraft(); });
 $('pjContacts').addEventListener('click', (ev) => { const b = ev.target.closest('[data-role]'); if (!b) return; const i = +b.closest('.contact').dataset.i; draft.contacts[i].role = b.dataset.role; renderDraft(); });
@@ -630,11 +630,11 @@ function shrinkImage(file, max) {
   });
 }
 function vcardFor(p, contacts) {
-  const clean = (s) => String(s || '').replace(/[\r\n]+/g, ' ').replace(/([,;\\])/g, '\\$1');
+  const clean = (v) => String(v || '').replace(/[\r\n]+/g, ' ').replace(/([,;\\])/g, '\\$1');
   return contacts.map((c) => {
-    const name = c.name || `${c.role} ${p.street || ''}`.trim();
-    const notes = [`${c.role} בפרויקט ${p.address}`, p.stage ? `שלב: ${p.stage}` : '', `נמצא בסיור ${new Date(p.created).toLocaleDateString('he-IL')}`, p.note].filter(Boolean).join(' · ');
-    return ['BEGIN:VCARD', 'VERSION:3.0', `N:;${clean(name)};;;`, `FN:${clean(name)}`, `ORG:${clean(c.role + ' – ' + p.address)}`, `TITLE:${clean(c.role)}`, c.phone ? `TEL;TYPE=CELL:${clean(c.phone)}` : '', `ADR;TYPE=WORK:;;${clean(p.address)};;;;`, `NOTE:${clean(notes)}`, 'END:VCARD'].filter(Boolean).join('\r\n');
+    const name = (c.name || '').trim() || `${c.role || ''} ${p.street || ''}`.trim() || 'איש קשר';
+    const phone = (c.phone || '').replace(/[^\d+]/g, '');
+    return ['BEGIN:VCARD', 'VERSION:3.0', `N:;${clean(name)};;;`, `FN:${clean(name)}`, phone ? `TEL;TYPE=CELL:${phone}` : '', 'END:VCARD'].filter(Boolean).join('\r\n');
   }).join('\r\n');
 }
 function openVcard(p, contacts) {
@@ -668,25 +668,28 @@ function renderProjects() {
   list.innerHTML = S.projects.map((p, i) => `
     <div class="proj" data-i="${i}">
       <div class="proj-top">
-        ${p.photos && p.photos[0] ? `<img src="${p.photos[0]}" alt="">` : ''}
+        ${p.photos && p.photos.length === 1 ? `<img src="${p.photos[0]}" alt="תמונת הפרויקט" data-photo="0">` : ''}
         <div class="col gap4 grow">
           <b>${esc(p.address)}</b>
           <div class="row gap8 center-y">${p.stage ? `<span class="stage-tag">${esc(p.stage)}</span>` : ''}<span class="muted small">${new Date(p.created).toLocaleDateString('he-IL')}</span></div>
           ${p.note ? `<div class="muted small">${esc(p.note)}</div>` : ''}
         </div>
       </div>
-      ${(p.contacts || []).map((c) => `<div class="contact-line"><span>${esc(c.role)} · ${esc(c.name || '')}</span>${c.phone ? `<a href="tel:${esc(c.phone.replace(/[^\d+]/g, ''))}">${esc(c.phone)}</a>` : ''}</div>`).join('')}
+      ${p.photos && p.photos.length > 1 ? `<div class="photo-strip">${p.photos.map((ph, k) => `<img src="${ph}" alt="תמונה ${k + 1}" data-photo="${k}">`).join('')}</div>` : ''}
+      ${(p.contacts || []).map((c, ci) => `<div class="contact-line"><span>${esc(c.role)} · ${esc(c.name || '')}</span><span class="row gap8 center-y">${c.phone ? `<a href="tel:${esc(c.phone.replace(/[^\d+]/g, ''))}">${esc(c.phone)}</a>` : ''}<button type="button" class="mini-btn" data-act="vcf1" data-ci="${ci}">שמור</button></span></div>`).join('')}
       <div class="proj-actions">
         <a href="https://waze.com/ul?ll=${p.lat},${p.lon}&navigate=yes" target="_blank" rel="noopener">Waze</a>
-        ${(p.contacts || []).length ? '<button type="button" data-act="vcf">לאנשי קשר</button>' : ''}
         <button type="button" data-act="edit">עריכה</button>
         <button type="button" class="del" data-act="del">מחק</button>
       </div>
     </div>`).join('');
 }
 $('projList').addEventListener('click', async (ev) => {
+  const ph = ev.target.closest('[data-photo]');
+  if (ph) { const p0 = S.projects[+ph.closest('.proj').dataset.i]; openViewer(p0.photos, +ph.dataset.photo); return; }
   const b = ev.target.closest('[data-act]'); if (!b) return;
   const i = +b.closest('.proj').dataset.i, p = S.projects[i];
+  if (b.dataset.act === 'vcf1') { openVcard(p, [p.contacts[+b.dataset.ci]]); return; }
   if (b.dataset.act === 'vcf') openVcard(p, p.contacts);
   if (b.dataset.act === 'del') {
     if (b.dataset.armed) { S.projects.splice(i, 1); await saveProjects(); renderProjects(); renderProjMarkers(); }
@@ -710,6 +713,42 @@ $('projExport').addEventListener('click', async () => {
   if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], title: 'פרויקטים' }); return; } catch {} }
   const url = URL.createObjectURL(file); const a = document.createElement('a'); a.href = url; a.download = 'projects.csv'; document.body.appendChild(a); a.click(); a.remove();
 });
+
+// ================= photo viewer =================
+const V = { photos: [], i: 0, zoom: false, sx: 0 };
+function openViewer(photos, i) {
+  if (!photos || !photos.length) return;
+  V.photos = photos; V.i = i || 0; V.zoom = false; renderViewer();
+  $('viewer').classList.remove('hidden');
+}
+function renderViewer() {
+  const img = $('viewerImg'); img.src = V.photos[V.i];
+  img.classList.toggle('zoomed', V.zoom);
+  $('viewerCount').textContent = V.photos.length > 1 ? `${V.i + 1} / ${V.photos.length}` : '';
+  $('viewerPrev').classList.toggle('hidden', V.photos.length < 2); $('viewerNext').classList.toggle('hidden', V.photos.length < 2);
+  const box = $('viewerBox'); box.scrollLeft = 0; box.scrollTop = 0;
+}
+function viewerStep(d) { V.i = (V.i + d + V.photos.length) % V.photos.length; V.zoom = false; renderViewer(); }
+$('viewerClose').addEventListener('click', () => $('viewer').classList.add('hidden'));
+$('viewerPrev').addEventListener('click', () => viewerStep(-1));
+$('viewerNext').addEventListener('click', () => viewerStep(1));
+let lastTap = 0;
+$('viewerImg').addEventListener('click', (ev) => {
+  const now = Date.now();
+  if (now - lastTap < 320) { // double tap: zoom in around the tapped point / zoom out
+    const box = $('viewerBox'), img = $('viewerImg');
+    const r = img.getBoundingClientRect(), fx = (ev.clientX - r.left) / r.width, fy = (ev.clientY - r.top) / r.height;
+    V.zoom = !V.zoom; img.classList.toggle('zoomed', V.zoom);
+    if (V.zoom) requestAnimationFrame(() => { box.scrollLeft = img.scrollWidth * fx - box.clientWidth / 2; box.scrollTop = img.scrollHeight * fy - box.clientHeight / 2; });
+  }
+  lastTap = now;
+});
+$('viewerBox').addEventListener('touchstart', (ev) => { V.sx = ev.touches[0].clientX; }, { passive: true });
+$('viewerBox').addEventListener('touchend', (ev) => {
+  if (V.zoom || V.photos.length < 2) return;
+  const dx = ev.changedTouches[0].clientX - V.sx;
+  if (Math.abs(dx) > 60) viewerStep(dx < 0 ? 1 : -1);
+}, { passive: true });
 
 // ================= areas =================
 async function openArea(city) {
