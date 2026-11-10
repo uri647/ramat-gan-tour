@@ -29,6 +29,7 @@ const S = {
   announced: {}, simTimer: null, projects: [], offGraph: false,
 };
 window.__S = S; // debug handle
+setTimeout(() => { window.__onFix = onFix; }, 0);
 const today = () => new Date().toISOString().slice(0, 10);
 const progKey = () => 'st:prog:' + settings.city;
 
@@ -314,7 +315,10 @@ function onFix(lat, lon, acc, headingDeg, speed) {
   const prev = S.lastFix;
   if (acc > 60) { updateMe(lat, lon, headingDeg); setBanner('gray', '', 'קליטת GPS חלשה…'); return; }
   const heading = headingDeg != null ? (90 - headingDeg) * Math.PI / 180 : null;
+  const prevMatch = S.matcher.last ? { ...S.matcher.last } : null;
+  const gapSec = prev ? (Date.now() - prev.t) / 1000 : 0;
   const r = S.matcher.update({ x, y, acc, heading, speed });
+  if (prevMatch && r.match && gapSec > 6) fillGap(prevMatch, r.match, gapSec, r);
   S.lastFix = { x, y, t: Date.now() }; S.lastLL = [lat, lon];
   let hdg = headingDeg;
   if (hdg == null && prev && Math.hypot(x - prev.x, y - prev.y) > 4) hdg = 90 - Math.atan2(y - prev.y, x - prev.x) * 180 / Math.PI;
@@ -356,6 +360,38 @@ function onFix(lat, lon, acc, headingDeg, speed) {
     S.lastEdge = r.match.e; replan();
   }
   updateInstruction();
+}
+
+// The phone does not give a web app GPS while it is in the background. When we come back
+// after a gap, infer the streets driven in between: the shortest legal route from the last
+// known point to the current one, if it is plausible for the time that passed.
+function fillGap(a, b, gapSec, r) {
+  const g = S.g;
+  if (a.e === b.e) { if (S.cov.markRange(b.e, a.pos, b.pos)) r.newly.push(b.e); return; }
+  const ea = g.edges[a.e], eb = g.edges[b.e];
+  const [ax, ay] = C.pointOnEdge(g, ea, a.pos), [bx, by] = C.pointOnEdge(g, eb, b.pos);
+  const straight = Math.hypot(bx - ax, by - ay);
+  if (straight < 40 || gapSec > 20 * 60) return;
+  const src = C.sourcesFromMatch(g, a);
+  let best = null;
+  for (const [node, entryPos, fwd] of [[eb.a, 0, true], [eb.b, eb.len, false]]) {
+    if ((fwd && eb.dir < 0) || (!fwd && eb.dir > 0)) continue;
+    for (const s0 of src) {
+      const p = C.routeToNode(g, [s0], node); if (!p) continue;
+      const L = s0.dist + C.pathLength(g, p, 0, p.length) + Math.abs(b.pos - entryPos);
+      if (!best || L < best.L) best = { p, L, s0, entryPos };
+    }
+  }
+  if (!best) return;
+  // plausibility: not longer than driving at ~90 km/h for the gap, and not a huge detour
+  if (best.L > Math.max(400, gapSec * 25) || best.L > straight * 2.2 + 600) return;
+  let added = 0;
+  const mark = (id, p0, p1) => { if (!S.cov.covered[id]) { if (p0 == null) S.cov.setCovered(id); else S.cov.markRange(id, p0, p1); if (S.cov.covered[id]) { r.newly.push(id); if (g.edges[id].req) added++; } } };
+  mark(a.e, a.pos, best.s0.cur.fwd ? ea.len : 0);
+  for (const st of best.p) mark(st.e, null);
+  mark(b.e, best.entryPos, b.pos);
+  dayStats().m += best.L;
+  if (added) toast(`סימנתי ${added} קטעי רחוב שעברת כשהאפליקציה הייתה ברקע`, 3500);
 }
 
 function offGraphTarget() {
@@ -503,7 +539,7 @@ function pauseHere() {
 // wake lock
 async function requestWake() { try { if ('wakeLock' in navigator) S.wakeLock = await navigator.wakeLock.request('screen'); } catch {} }
 function releaseWake() { try { S.wakeLock && S.wakeLock.release(); } catch {} S.wakeLock = null; }
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.mode !== 'idle') requestWake(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.mode !== 'idle') { requestWake(); A.jump = true; S.lastEdge = -1; } });
 
 // ================= simulation =================
 function startSim() {
