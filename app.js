@@ -137,7 +137,7 @@ const COLORS = { todo: '#A3ADBD', done: '#16A34A', skip: '#F87171', plan: '#2563
 function initMap() {
   if (map) { setTimeout(() => map.invalidateSize(), 50); return; }
   map = L.map('map', { zoomControl: false, attributionControl: true, preferCanvas: true });
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { maxZoom: 20, subdomains: 'abcd', attribution: '© OpenStreetMap © CARTO' }).addTo(map);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap', className: 'base-tiles' }).addTo(map);
   const renderer = L.canvas({ padding: 0.5 });
   edgeLines = [];
   for (const e of S.g.reqEdges) {

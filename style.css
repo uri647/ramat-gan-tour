@@ -117,3 +117,6 @@ button,input,select,textarea{font:inherit;color:inherit}
 .me-marker .dot{position:absolute;inset:4px;border-radius:50%;background:#2563EB;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.3)}
 .me-marker .arrow{position:absolute;left:50%;top:-9px;margin-left:-6px;width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:10px solid #2563EB}
 .leaflet-container{font-family:inherit}
+
+/* soften the base map so the colored street lines stand out */
+.base-tiles{filter:saturate(.45) brightness(1.04) contrast(.92)}
