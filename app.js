@@ -18,7 +18,7 @@ const ls = {
 
 // ================= state =================
 const $ = (id) => document.getElementById(id);
-const settings = Object.assign({ city: 'רמת גן', voice: true, sim: false, simSpeed: 1 }, ls.get('st:settings', {}));
+const settings = Object.assign({ city: 'רמת גן', voice: true, sim: false, simSpeed: 1, headingUp: true }, ls.get('st:settings', {}));
 const saveSettings = () => ls.set('st:settings', settings);
 const S = {
   g: null, cov: null, matcher: null, progress: null,
@@ -137,7 +137,7 @@ let map, edgeLines = [], planLine, meMarker, projLayer, flagMarker;
 const COLORS = { todo: '#A3ADBD', done: '#16A34A', skip: '#F87171', plan: '#2563EB', toPoint: '#7C3AED' };
 function initMap() {
   if (map) { setTimeout(() => map.invalidateSize(), 50); return; }
-  map = L.map('map', { zoomControl: false, attributionControl: true, preferCanvas: true });
+  map = L.map('map', { zoomControl: false, attributionControl: true, preferCanvas: true, rotate: true, rotateControl: false, touchRotate: false, shiftKeyRotate: false, pitchDrag: false, bearing: 0 });
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap', className: 'base-tiles' }).addTo(map);
   const renderer = L.canvas({ padding: 0.5 });
   edgeLines = [];
@@ -147,6 +147,7 @@ function initMap() {
     styleEdge(e.id);
   }
   planLine = L.polyline([], { renderer, weight: 8, color: COLORS.plan, opacity: 0.85, interactive: false }).addTo(map);
+  window.__map = map; window.__plan = planLine;
   projLayer = L.layerGroup().addTo(map);
   renderProjMarkers();
   const b = L.latLngBounds(S.g.reqEdges.map((e) => e.ll[0]));
@@ -171,11 +172,37 @@ function setFlag(p) {
   if (!p || !map) return;
   flagMarker = L.marker([p.lat, p.lon], { icon: L.divIcon({ className: '', iconSize: [26, 40], iconAnchor: [2, 38], html: '<svg width="26" height="40" viewBox="0 0 26 40"><line x1="2" y1="2" x2="2" y2="38" stroke="#0F172A" stroke-width="3" stroke-linecap="round"/><path d="M3 3 L24 10 L3 17 Z" fill="#DC2626"/></svg>' }), interactive: false }).addTo(map);
 }
+// heading smoothing (degrees, clockwise from north)
+function smoothHeading(h) {
+  if (h == null || isNaN(h)) return S.hdg ?? null;
+  if (S.hdg == null) return (S.hdg = h);
+  const d = ((h - S.hdg + 540) % 360) - 180;
+  S.hdg = (S.hdg + d * 0.45 + 360) % 360;
+  return S.hdg;
+}
 function updateMe(lat, lon, headingDeg) {
-  const html = `<div class="me-marker" style="transform:rotate(${headingDeg || 0}deg)"><div class="halo"></div>${headingDeg != null ? '<div class="arrow"></div>' : ''}<div class="dot"></div></div>`;
-  if (!meMarker) meMarker = L.marker([lat, lon], { icon: L.divIcon({ className: '', iconSize: [30, 30], iconAnchor: [15, 15], html }), interactive: false, zIndexOffset: 1000 }).addTo(map);
-  else { meMarker.setLatLng([lat, lon]); meMarker.setIcon(L.divIcon({ className: '', iconSize: [30, 30], iconAnchor: [15, 15], html })); }
-  if (S.follow) map.setView([lat, lon], Math.max(map.getZoom(), 17), { animate: true });
+  const hdg = smoothHeading(headingDeg);
+  const rotate = settings.headingUp && S.follow && hdg != null;
+  if (rotate) { try { map.setBearing((360 - hdg) % 360); } catch {} } // leaflet-rotate turns the map clockwise by the bearing
+  else if (!settings.headingUp && map.getBearing && map.getBearing() !== 0) { try { map.setBearing(0); } catch {} }
+  const bearing = map.getBearing ? map.getBearing() : 0;
+  const screenRot = hdg != null ? hdg + bearing : 0;
+  const html = `<div class="me-marker" style="transform:rotate(${screenRot}deg)"><div class="halo"></div>${hdg != null ? '<div class="arrow"></div>' : ''}<div class="dot"></div></div>`;
+  const icon = L.divIcon({ className: '', iconSize: [30, 30], iconAnchor: [15, 15], html });
+  if (!meMarker) meMarker = L.marker([lat, lon], { icon, interactive: false, zIndexOffset: 1000 }).addTo(map);
+  else { meMarker.setLatLng([lat, lon]); meMarker.setIcon(icon); }
+  if (S.follow) {
+    const z = Math.max(map.getZoom(), 17);
+    map.setView([lat, lon], z, { animate: false });
+    // put the driver in the lower part of the screen so more road ahead is visible
+    if (rotate) map.panBy([0, -map.getSize().y * 0.08], { animate: false });
+  }
+}
+function renderOrient() {
+  $('orientBtn').classList.toggle('on', !!settings.headingUp);
+  $('orientIcon').innerHTML = settings.headingUp
+    ? '<path d="M12 3l6 16-6-4-6 4z" fill="#2563EB" stroke="#2563EB"/>'
+    : '<path d="M12 3l5 9h-10z" fill="#DC2626" stroke="#DC2626"/><path d="M7 12h10l-5 9z" fill="none"/><text x="12" y="23" font-size="0"></text>';
 }
 
 // ================= voice =================
@@ -217,7 +244,7 @@ function startGps() {
   if (!('geolocation' in navigator)) { setBanner('gray', '', 'אין גישה ל-GPS במכשיר הזה'); return; }
   S.watchId = navigator.geolocation.watchPosition((pos) => {
     const c = pos.coords;
-    onFix(c.latitude, c.longitude, c.accuracy, (c.heading != null && !isNaN(c.heading)) ? c.heading : null, c.speed || 0);
+    onFix(c.latitude, c.longitude, c.accuracy, (c.heading != null && !isNaN(c.heading) && c.heading >= 0 && (c.speed || 0) > 1.5) ? c.heading : null, c.speed || 0);
   }, (err) => {
     setBanner('gray', '', err.code === 1 ? 'צריך לאשר גישה למיקום בהגדרות הטלפון' : 'אין קליטת GPS כרגע…');
   }, { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 });
@@ -232,7 +259,7 @@ function onFix(lat, lon, acc, headingDeg, speed) {
   const r = S.matcher.update({ x, y, acc, heading, speed });
   S.lastFix = { x, y, t: Date.now() }; S.lastLL = [lat, lon];
   let hdg = headingDeg;
-  if (hdg == null && prev && Math.hypot(x - prev.x, y - prev.y) > 3) hdg = 90 - Math.atan2(y - prev.y, x - prev.x) * 180 / Math.PI;
+  if (hdg == null && prev && Math.hypot(x - prev.x, y - prev.y) > 4) hdg = 90 - Math.atan2(y - prev.y, x - prev.x) * 180 / Math.PI;
   updateMe(lat, lon, hdg);
 
   if (prev && r.match) {
@@ -633,7 +660,14 @@ $('nearestBtn').addEventListener('click', () => startNav('cover'));
 $('pauseBtn').addEventListener('click', pauseHere);
 $('foundBtn').addEventListener('click', openProject);
 $('blockedBtn').addEventListener('click', skipNext);
-$('recenterBtn').addEventListener('click', () => { S.follow = true; if (S.lastLL) map.setView(S.lastLL, 17); });
+$('recenterBtn').addEventListener('click', () => { S.follow = true; if (S.lastLL) updateMe(S.lastLL[0], S.lastLL[1], null); });
+$('orientBtn').addEventListener('click', () => {
+  settings.headingUp = !settings.headingUp; saveSettings(); renderOrient();
+  if (!settings.headingUp) { try { map.setBearing(0); } catch {} }
+  S.follow = true; if (S.lastLL) updateMe(S.lastLL[0], S.lastLL[1], null);
+  toast(settings.headingUp ? 'המפה מסתובבת לפי כיוון הנסיעה' : 'צפון למעלה');
+});
+renderOrient();
 $('muteBtn').addEventListener('click', () => { settings.voice = !settings.voice; saveSettings(); $('muteBtn').classList.toggle('off', !settings.voice); toast(settings.voice ? 'הוראות קוליות פעילות' : 'הוראות קוליות כבויות'); });
 $('psHome').addEventListener('click', () => { $('pauseSheet').classList.add('hidden'); renderHome(); show('home'); });
 $('psContinue').addEventListener('click', () => { $('pauseSheet').classList.add('hidden'); startNav('cover'); });

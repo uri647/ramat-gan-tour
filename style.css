@@ -120,3 +120,4 @@ button,input,select,textarea{font:inherit;color:inherit}
 
 /* soften the base map so the colored street lines stand out */
 .base-tiles{filter:saturate(.45) brightness(1.04) contrast(.92)}
+.icon-btn.on{border-color:#93C5FD}
