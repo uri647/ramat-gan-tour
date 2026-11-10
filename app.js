@@ -70,9 +70,10 @@ async function overpass(q, status, timeoutMs = 90000) {
   throw lastErr;
 }
 // street data baked into the site at build time (no external server needed)
+async function prebuiltList() { try { return await (await fetch('data/cities.json', { cache: 'no-cache' })).json(); } catch { return {}; } }
 async function loadPrebuilt(city) {
   try {
-    const m = await (await fetch('data/cities.json', { cache: 'no-cache' })).json();
+    const m = await prebuiltList();
     if (!m[city]) return null;
     const d = await (await fetch('data/' + m[city])).json();
     const g = C.deserializeGraph(d);
@@ -586,6 +587,30 @@ $('projExport').addEventListener('click', async () => {
   const url = URL.createObjectURL(file); const a = document.createElement('a'); a.href = url; a.download = 'projects.csv'; document.body.appendChild(a); a.click(); a.remove();
 });
 
+// ================= areas =================
+async function openArea(city) {
+  settings.city = city; saveSettings();
+  if (map) { map.remove(); map = null; meMarker = null; flagMarker = null; }
+  let g = null;
+  try { const d = await idb.get('graph:' + city); if (d) g = C.deserializeGraph(d); } catch {}
+  if (!g) g = await loadPrebuilt(city);
+  if (!g) return false;
+  S.g = g; loadProgress(); await loadProjects(); renderHome(); show('home');
+  return true;
+}
+async function showSetup() {
+  const m = await prebuiltList();
+  $('areaList').innerHTML = Object.keys(m).map((c) => `<button type="button" class="btn primary big" data-area="${esc(c)}">${esc(c)}</button>`).join('') || '';
+  show('setup');
+}
+$('areaList').addEventListener('click', async (ev) => {
+  const b = ev.target.closest('[data-area]'); if (!b) return;
+  b.disabled = true; $('loadStatus').textContent = 'טוען…';
+  const ok = await openArea(b.dataset.area);
+  $('loadStatus').textContent = ok ? '' : 'לא הצלחתי לטעון את האזור';
+  b.disabled = false;
+});
+
 // ================= wiring =================
 $('loadCityBtn').addEventListener('click', async () => {
   const city = $('cityInput').value.trim(); if (!city) return;
@@ -625,7 +650,7 @@ $('stSim').addEventListener('change', (e) => { settings.sim = e.target.checked; 
 $('stSimSpeed').addEventListener('change', (e) => { settings.simSpeed = +e.target.value; saveSettings(); });
 $('stClose').addEventListener('click', () => { $('settingsSheet').classList.add('hidden'); renderHome(); });
 $('stReload').addEventListener('click', () => { S.forceDownload = true; $('settingsSheet').classList.add('hidden'); $('cityInput').value = settings.city; show('setup'); $('loadCityBtn').click(); });
-$('stCity').addEventListener('click', () => { $('settingsSheet').classList.add('hidden'); $('cityInput').value = ''; show('setup'); });
+$('stCity').addEventListener('click', () => { if (S.mode !== 'idle') stopNav(); $('settingsSheet').classList.add('hidden'); $('cityInput').value = ''; showSetup(); });
 $('stReset').addEventListener('click', (ev) => {
   const b = ev.currentTarget;
   if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = 'בטוח? כל הרחובות יסומנו מחדש כלא נסועים. לחץ שוב'; setTimeout(() => { delete b.dataset.armed; b.textContent = 'אפס את ההתקדמות'; }, 4000); return; }
@@ -647,5 +672,5 @@ $('muteBtn').classList.toggle('off', !settings.voice);
     if (g) { S.g = g; loadProgress(); await loadProjects(); renderHome(); show('home'); return; }
   } catch (e) { console.error(e); }
   $('cityInput').value = settings.city;
-  show('setup');
+  showSetup();
 })();

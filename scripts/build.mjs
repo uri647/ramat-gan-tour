@@ -4,7 +4,11 @@
 import { cpSync, mkdirSync, writeFileSync, rmSync, readdirSync } from 'node:fs';
 import { buildGraph, serializeGraph, HIGHWAY_RE } from '../core.js';
 
-const CITIES = [{ name: 'רמת גן', query: 'Ramat Gan, Israel', file: 'ramat-gan.json' }];
+const CITIES = [
+  { name: 'רמת גן', areas: ['Ramat Gan, Israel'], file: 'ramat-gan.json' },
+  // test area near home: the three Kfar Ganim neighbourhoods in Petah Tikva
+  { name: 'כפר גנים (פתח תקווה)', areas: ['כפר גנים א, פתח תקווה', 'כפר גנים ב, פתח תקווה', 'כפר גנים ג, פתח תקווה'], radius: 550, file: 'kfar-ganim.json' },
+];
 const UA = 'ramat-gan-tour-build/1.0 (https://github.com/uri647/ramat-gan-tour)';
 
 const out = 'dist';
@@ -79,10 +83,27 @@ async function fetchTile(s, w, n, e, nodes, ways, depth = 0) {
 }
 
 export async function buildCity(city) {
-  const nom = JSON.parse((await get(`https://nominatim.openstreetmap.org/search?format=json&polygon_geojson=1&limit=5&q=${encodeURIComponent(city.query)}`)).text);
-  const place = nom.find((p) => p.geojson && /Polygon/.test(p.geojson.type));
-  if (!place) throw new Error('city boundary not found');
-  const [bs, bn, bw, be] = place.boundingbox.map(Number);
+  // boundary = union of the areas; an area Nominatim only knows as a point becomes a circle of `radius` m
+  const shapes = []; let bs = 90, bn = -90, bw = 180, be = -180;
+  for (const q of city.areas) {
+    const nom = JSON.parse((await get(`https://nominatim.openstreetmap.org/search?format=json&polygon_geojson=1&limit=3&countrycodes=il&q=${encodeURIComponent(q)}`)).text);
+    await new Promise((r) => setTimeout(r, 1100)); // Nominatim: max 1 request/second
+    const poly = nom.find((p) => p.geojson && /Polygon/.test(p.geojson.type));
+    const hit = poly || nom[0];
+    if (!hit) { console.log('  area not found:', q); continue; }
+    let geo;
+    if (poly) geo = poly.geojson;
+    else {
+      const lat = +hit.lat, lon = +hit.lon, R = city.radius || 600, ring = [];
+      for (let k = 0; k <= 32; k++) { const a = k / 32 * 2 * Math.PI; ring.push([lon + R * Math.cos(a) / (111320 * Math.cos(lat * Math.PI / 180)), lat + R * Math.sin(a) / 110540]); }
+      geo = { type: 'Polygon', coordinates: [ring] };
+    }
+    for (const poly2 of (geo.type === 'Polygon' ? [geo.coordinates] : geo.coordinates)) for (const [lo, la] of poly2[0]) { bs = Math.min(bs, la); bn = Math.max(bn, la); bw = Math.min(bw, lo); be = Math.max(be, lo); }
+    shapes.push(geo);
+    console.log(`  area: ${q} -> ${poly ? 'polygon' : 'point+radius'} (${hit.display_name})`);
+  }
+  if (!shapes.length) throw new Error('city boundary not found');
+  const inside = (lat, lon) => shapes.some((g) => pointInPoly(lat, lon, g));
   const B = 0.006, S0 = bs - B, N0 = bn + B, W0 = bw - B, E0 = be + B, T = 0.012;
   const tiles = [];
   for (let s = S0; s < N0; s += T) for (let w = W0; w < E0; w += T) tiles.push([s, w, Math.min(s + T, N0), Math.min(w + T, E0)]);
@@ -94,7 +115,7 @@ export async function buildCity(city) {
     while (queue.length) { const t = queue.shift(); await fetchTile(...t, nodes, ways); done++; if (done % 10 === 0) console.log(`  ${done}/${tiles.length} tiles`); }
   }));
   const req = new Set();
-  for (const w of ways.values()) if (w.nodes.some((id) => { const ll = nodes.get(id); return ll && pointInPoly(ll[0], ll[1], place.geojson); })) req.add(w.id);
+  for (const w of ways.values()) if (w.nodes.some((id) => { const ll = nodes.get(id); return ll && inside(ll[0], ll[1]); })) req.add(w.id);
   const elements = [];
   for (const [id, [lat, lon]] of nodes) elements.push({ type: 'node', id, lat, lon });
   for (const w of ways.values()) elements.push(w);
@@ -112,6 +133,8 @@ for (const city of CITIES) {
     data.city = city.name; data.builtAt = new Date().toISOString();
     writeFileSync(`${out}/data/${city.file}`, JSON.stringify(data));
     manifest[city.name] = city.file;
+    const names = [...new Set(g.reqEdges.map((e) => e.name).filter(Boolean))];
+    console.log(`  streets (${names.length}): ${names.slice(0, 40).join(', ')}`);
     console.log(`  ok: ${g.reqEdges.length} street segments, ${(g.totalReqLen / 1000).toFixed(0)} km, ${g.edges.filter((e) => e.unreachable).length} unreachable`);
   } catch (e) {
     console.log('  skipped', city.name, '-', e.message || e, '(the app will download it on the phone instead)');

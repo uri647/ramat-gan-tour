@@ -25,10 +25,12 @@
       <h1>סיור רחובות</h1>
       <p class="muted">האפליקציה תוריד את כל רחובות העיר ממפה פתוחה (OpenStreetMap), ותנווט אותך כך שתעבור בכל רחוב, בלי לפספס.</p>
     </div>
-    <label class="field">עיר
+    <div class="col gap10" id="areaList"></div>
+    <div class="divider"></div>
+    <label class="field">או עיר אחרת (הורדה מהאינטרנט)
       <input id="cityInput" type="text" value="רמת גן">
     </label>
-    <button id="loadCityBtn" class="btn primary big">הורד את רחובות העיר</button>
+    <button id="loadCityBtn" class="btn secondary">הורד את רחובות העיר</button>
     <div id="loadStatus" class="muted center"></div>
   </div>
 </section>
@@ -236,7 +238,7 @@
     <div class="divider"></div>
     <div class="muted small" id="stInfo"></div>
     <button class="btn secondary" id="stReload">הורד מחדש את רחובות העיר</button>
-    <button class="btn secondary" id="stCity">החלף עיר</button>
+    <button class="btn secondary" id="stCity">החלף אזור (רמת גן / כפר גנים)</button>
     <button class="btn danger" id="stReset">אפס את ההתקדמות</button>
     <button class="btn primary" id="stClose">סגור</button>
   </div>
