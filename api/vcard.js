@@ -9,7 +9,8 @@ export default function handler(req, res) {
   const org = clean(url.searchParams.get('org'), 80).trim();
   const lines = [
     'BEGIN:VCARD', 'VERSION:3.0',
-    `N;CHARSET=UTF-8:;${esc(name)};;;`,
+    // N = family;given — split so iPhone fills both name fields
+    `N;CHARSET=UTF-8:${esc(name.split(/\s+/).slice(1).join(' '))};${esc(name.split(/\s+/)[0])};;;`,
     `FN;CHARSET=UTF-8:${esc(name)}`,
     org ? `ORG;CHARSET=UTF-8:${esc(org)}` : '',
     phone ? `TEL;TYPE=CELL:${phone}` : '',
