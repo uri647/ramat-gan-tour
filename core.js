@@ -150,7 +150,48 @@ export function finalizeGraph(g) {
   g.reqEdges = g.edges.filter((e) => e.req && !e.unreachable);
   g.totalReqLen = g.reqEdges.reduce((s, e) => s + e.len, 0);
   buildSpatialIndex(g);
+  findTwins(g);
   return g;
+}
+
+// Divided roads are drawn as two one-way lines with the same name, a few meters apart.
+// Driving one side shows you both sides, so each side is the "twin" of the other.
+const TWIN_DIST = 40;
+function travelDir(e, segDir) { return e.dir === -1 ? segDir + Math.PI : segDir; }
+function findTwins(g) {
+  const twins = new Map();
+  const add = (a, b) => { let s = twins.get(a); if (!s) twins.set(a, s = new Set()); s.add(b); };
+  for (const A of g.edges) {
+    if (!A.req || A.dir === 0 || !A.name || A.roundabout) continue;
+    const n = Math.max(1, Math.round(A.len / 15));
+    for (let k = 0; k <= n; k++) {
+      const pos = A.len * k / n;
+      const [x, y] = pointOnEdge(g, A, pos);
+      const here = nearEdges(g, x, y, 1).find((c) => c.e === A.id);
+      if (!here) continue;
+      const dirA = travelDir(A, here.segDir);
+      for (const c of nearEdges(g, x, y, TWIN_DIST)) {
+        if (c.e === A.id) continue;
+        const B = g.edges[c.e];
+        if (!B.req || B.dir === 0 || B.name !== A.name || B.roundabout) continue;
+        const diff = Math.abs(normAngle(travelDir(B, c.segDir) - dirA));
+        if (diff > Math.PI * 0.8) { add(A.id, B.id); add(B.id, A.id); }
+      }
+    }
+  }
+  g.twins = twins;
+}
+
+/** Distance along edge e of the closest point to (x,y), and the distance to it. */
+export function projectOnEdge(g, e, x, y) {
+  let best = { pos: 0, d: Infinity }, acc = 0;
+  for (let k = 1; k < e.pts.length; k++) {
+    const [ax, ay] = e.pts[k - 1], [bx, by] = e.pts[k];
+    const L = hyp(bx - ax, by - ay), p = projectOnSeg(x, y, ax, ay, bx, by);
+    if (p.d < best.d) best = { pos: acc + p.t * L, d: p.d };
+    acc += L;
+  }
+  return best;
 }
 
 const r6 = (v) => Math.round(v * 1e6) / 1e6;
@@ -232,7 +273,33 @@ export class Coverage {
   isDone(id) { return this.covered[id] === 1; }
   coveredLen() { let s = 0; for (const e of this.g.reqEdges) if (this.covered[e.id] || e.skip) s += e.len; return s; }
   remaining() { return this.g.reqEdges.filter((e) => !this.covered[e.id] && !e.skip); }
+  /** Newly completed twin edges since the last call. */
+  takeTwinNewly() { const t = this.twinNewly || []; this.twinNewly = []; return t; }
+  shadowTwins(id, p0, p1) {
+    const g = this.g, tw = g.twins && g.twins.get(id); if (!tw) return;
+    const e = g.edges[id];
+    const lo = Math.max(0, Math.min(p0, p1)), hi = Math.min(e.len, Math.max(p0, p1));
+    for (const t of tw) {
+      if (this.covered[t]) continue;
+      const T = g.edges[t];
+      // project a few points of the driven range onto the other side
+      const qs = [];
+      const steps = Math.max(1, Math.ceil((hi - lo) / 15));
+      for (let i = 0; i <= steps; i++) {
+        const [x, y] = pointOnEdge(g, e, lo + (hi - lo) * i / steps);
+        const q = projectOnEdge(g, T, x, y);
+        if (q.d < TWIN_DIST + 5) qs.push(q.pos);
+      }
+      if (!qs.length) continue;
+      if (this._mark(t, Math.min(...qs), Math.max(...qs))) (this.twinNewly || (this.twinNewly = [])).push(t);
+    }
+  }
   markRange(id, p0, p1) {
+    if (this.covered[id]) return false;
+    this.shadowTwins(id, p0, p1);
+    return this._mark(id, p0, p1);
+  }
+  _mark(id, p0, p1) {
     if (this.covered[id]) return false;
     const e = this.g.edges[id];
     const n = Math.max(1, Math.round(e.len / BIN));
@@ -245,7 +312,7 @@ export class Coverage {
     if (c >= need) { this.covered[id] = 1; this.bins.delete(id); return true; }
     return false;
   }
-  setCovered(id) { this.covered[id] = 1; this.bins.delete(id); }
+  setCovered(id) { if (!this.covered[id]) this.shadowTwins(id, 0, this.g.edges[id].len); this.covered[id] = 1; this.bins.delete(id); }
   keys() { const out = []; for (const e of this.g.edges) if (this.covered[e.id]) out.push(e.key); return out; }
   loadKeys(keys) { const s = new Set(keys); for (const e of this.g.edges) if (s.has(e.key)) this.covered[e.id] = 1; }
 }
@@ -301,6 +368,7 @@ export class Matcher {
         if (fwd === null) fwd = p0 === 0;
       }
       if (this.cov.markRange(best.e, p0, best.pos)) newly.push(best.e);
+      for (const t of this.cov.takeTwinNewly()) newly.push(t);
       this.last = { e: best.e, pos: best.pos, fwd, d: best.d, qx: best.qx, qy: best.qy, segDir: best.segDir };
     } else {
       this.last = null;
@@ -432,7 +500,7 @@ export function planAhead(g, cov, sources, maxLen = 3000, maxTargets = 80) {
     for (const s of seg) {
       plan.push(s); len += g.edges[s.e].len;
       const e = g.edges[s.e];
-      if (e.req) tmp.add(s.e);
+      if (e.req) { tmp.add(s.e); const tw = g.twins && g.twins.get(s.e); if (tw) for (const t of tw) tmp.add(t); }
     }
     targets++;
     const last = seg[seg.length - 1], le = g.edges[last.e];

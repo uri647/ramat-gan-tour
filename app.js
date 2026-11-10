@@ -367,7 +367,7 @@ function onFix(lat, lon, acc, headingDeg, speed) {
 // known point to the current one, if it is plausible for the time that passed.
 function fillGap(a, b, gapSec, r) {
   const g = S.g;
-  if (a.e === b.e) { if (S.cov.markRange(b.e, a.pos, b.pos)) r.newly.push(b.e); return; }
+  if (a.e === b.e) { if (S.cov.markRange(b.e, a.pos, b.pos)) r.newly.push(b.e); for (const t of S.cov.takeTwinNewly()) r.newly.push(t); return; }
   const ea = g.edges[a.e], eb = g.edges[b.e];
   const [ax, ay] = C.pointOnEdge(g, ea, a.pos), [bx, by] = C.pointOnEdge(g, eb, b.pos);
   const straight = Math.hypot(bx - ax, by - ay);
@@ -391,6 +391,7 @@ function fillGap(a, b, gapSec, r) {
   for (const st of best.p) mark(st.e, null);
   mark(b.e, best.entryPos, b.pos);
   dayStats().m += best.L;
+  for (const t of S.cov.takeTwinNewly()) r.newly.push(t);
   if (added) toast(`סימנתי ${added} קטעי רחוב שעברת כשהאפליקציה הייתה ברקע`, 3500);
 }
 
