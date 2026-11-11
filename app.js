@@ -177,7 +177,10 @@ function styleEdge(id) {
 function renderProjMarkers() {
   if (!projLayer) return;
   projLayer.clearLayers();
-  for (const p of S.projects) L.circleMarker([p.lat, p.lon], { radius: 9, color: '#fff', weight: 3, fillColor: '#F59E0B', fillOpacity: 1 }).addTo(projLayer);
+  S.projects.forEach((p) => {
+    L.circleMarker([p.lat, p.lon], { radius: 11, color: '#fff', weight: 3, fillColor: '#F59E0B', fillOpacity: 1 })
+      .on('click', (ev) => { L.DomEvent.stopPropagation(ev); showProjCard(p.id); }).addTo(projLayer);
+  });
 }
 function setFlag(p) {
   if (flagMarker) { flagMarker.remove(); flagMarker = null; }
@@ -221,11 +224,12 @@ function frame(now) {
   } else if (!settings.headingUp && map.getBearing() !== 0) map.setBearing(0);
   // marker
   if (!meMarker) {
-    const html = '<div class="me-marker"><div class="halo"></div><div class="arrow"></div><div class="dot"></div></div>';
+    const html = '<div class="me-wrap"><div class="me-marker"><div class="halo"></div><div class="arrow"></div><div class="dot"></div></div><div class="me-street"></div></div>';
     meMarker = L.marker(ll, { icon: L.divIcon({ className: '', iconSize: [30, 30], iconAnchor: [15, 15], html }), interactive: false, zIndexOffset: 1000 }).addTo(map);
     A.el = null;
   } else meMarker.setLatLng(ll);
-  if (!A.el) A.el = meMarker.getElement() && meMarker.getElement().querySelector('.me-marker');
+  if (!A.el) { const root = meMarker.getElement(); A.el = root && root.querySelector('.me-marker'); A.lbl = root && root.querySelector('.me-street'); }
+  if (A.lbl) { const m = S.matcher && S.matcher.last; const nm = m && m.d < 30 ? (g.edges[m.e].name || '') : ''; if (A.lbl.textContent !== nm) A.lbl.textContent = nm; }
   if (A.el) {
     A.el.style.transform = `rotate(${((A.hdg ?? 0) + map.getBearing()) % 360}deg)`;
     A.el.classList.toggle('nohdg', A.hdg == null);
@@ -274,12 +278,54 @@ function renderOrient() {
     : '<path d="M12 3l5 9h-10z" fill="#DC2626" stroke="#DC2626"/><path d="M7 12h10l-5 9z" fill="none"/><text x="12" y="23" font-size="0"></text>';
 }
 
+// ================= contacts: call / WhatsApp / save =================
+function waNumber(phone) {
+  let d = String(phone || '').replace(/[^\d+]/g, '');
+  if (d.startsWith('+')) d = d.slice(1); else if (d.startsWith('00')) d = d.slice(2); else if (d.startsWith('0')) d = '972' + d.slice(1);
+  return d;
+}
+function contactRow(c, ci) {
+  const tel = String(c.phone || '').replace(/[^\d+]/g, '');
+  return `<div class="c-row"><span class="col"><span>${esc(c.role || '')}${c.name ? ' · ' + esc(c.name) : ''}</span>${tel ? `<span class="muted small" dir="ltr" style="text-align:right">${esc(c.phone)}</span>` : ''}</span><span class="c-actions">
+    ${tel ? `<a class="c-btn call" href="tel:${esc(tel)}" aria-label="התקשר">📞</a><a class="c-btn wa" href="https://wa.me/${esc(waNumber(tel))}" target="_blank" rel="noopener" aria-label="וואטסאפ">WhatsApp</a>` : ''}
+    <button type="button" class="c-btn" data-act="vcf1" data-ci="${ci}">שמור</button></span></div>`;
+}
+
+// ================= project card on the map =================
+let pcId = null;
+function showProjCard(id) {
+  const p = S.projects.find((x) => x.id === id); if (!p) return;
+  pcId = id; hideStreetCard();
+  $('pcAddr').textContent = p.address || '';
+  $('pcInfo').textContent = [p.stage, new Date(p.created).toLocaleDateString('he-IL'), p.note].filter(Boolean).join(' · ');
+  const ph = $('pcPhoto');
+  if (p.photos && p.photos.length) { ph.src = p.photos[0]; ph.classList.remove('hidden'); } else ph.classList.add('hidden');
+  $('pcContacts').innerHTML = (p.contacts || []).map(contactRow).join('') || '<span class="muted small">אין אנשי קשר. אפשר להוסיף בעריכה</span>';
+  $('pcWaze').href = `https://waze.com/ul?ll=${p.lat},${p.lon}&navigate=yes`;
+  $('projCard').classList.remove('hidden');
+}
+function hideProjCard() { $('projCard').classList.add('hidden'); pcId = null; }
+$('pcClose').addEventListener('click', hideProjCard);
+$('pcPhoto').addEventListener('click', () => { const p = S.projects.find((x) => x.id === pcId); if (p) openViewer(p.photos, 0); });
+$('pcContacts').addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-act="vcf1"]'); if (!b) return;
+  const p = S.projects.find((x) => x.id === pcId); if (p) openVcard(p, [p.contacts[+b.dataset.ci]]);
+});
+$('pcEdit').addEventListener('click', () => {
+  const i = S.projects.findIndex((x) => x.id === pcId); if (i < 0) return;
+  hideProjCard();
+  draft = JSON.parse(JSON.stringify(S.projects[i])); if (!draft.contacts.length) draft.contacts.push({ role: 'קבלן', name: '', phone: '' });
+  $('pjAddress').value = draft.address; $('pjNote').value = draft.note || ''; renderDraft();
+  $('projectSheet').classList.remove('hidden'); S.editIndex = i;
+});
+
 // ================= tap a street to mark it =================
 let selLine = null, selEdge = null, scTimer = null;
 function onMapTap(ev) {
   const g = S.g, [x, y] = g.proj.toXY(ev.latlng.lat, ev.latlng.lng);
   const z = map.getZoom(), R = z >= 17 ? 25 : z >= 15 ? 50 : 90;
   const c = C.nearEdges(g, x, y, R).filter((m) => g.edges[m.e].req && !g.edges[m.e].unreachable).sort((a, b) => a.d - b.d)[0];
+  hideProjCard();
   if (!c) { hideStreetCard(); return; }
   showStreetCard(c.e);
 }
@@ -744,7 +790,7 @@ function renderProjects() {
         </div>
       </div>
       ${p.photos && p.photos.length > 1 ? `<div class="photo-strip">${p.photos.map((ph, k) => `<img src="${ph}" alt="תמונה ${k + 1}" data-photo="${k}">`).join('')}</div>` : ''}
-      ${(p.contacts || []).map((c, ci) => `<div class="contact-line"><span>${esc(c.role)} · ${esc(c.name || '')}</span><span class="row gap8 center-y">${c.phone ? `<a href="tel:${esc(c.phone.replace(/[^\d+]/g, ''))}">${esc(c.phone)}</a>` : ''}<button type="button" class="mini-btn" data-act="vcf1" data-ci="${ci}">שמור</button></span></div>`).join('')}
+      ${(p.contacts || []).map(contactRow).join('')}
       <div class="proj-actions">
         <a href="https://waze.com/ul?ll=${p.lat},${p.lon}&navigate=yes" target="_blank" rel="noopener">Waze</a>
         <button type="button" data-act="edit">עריכה</button>

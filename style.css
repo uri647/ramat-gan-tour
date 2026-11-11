@@ -146,3 +146,14 @@ button,input,select,textarea{font:inherit;color:inherit}
 .street-card{position:absolute;right:10px;left:10px;bottom:calc(240px + var(--sb));z-index:700;background:#fff;border:1px solid var(--line);border-radius:18px;padding:12px 14px;display:flex;flex-direction:column;gap:10px;box-shadow:0 8px 24px rgba(15,23,42,.18)}
 .street-card .btn{min-height:46px;font-size:15px;padding:0 10px}
 .icon-btn.small-x{width:36px;height:36px;font-size:15px}
+
+.me-wrap{position:relative;width:30px;height:30px}
+.me-street{position:absolute;top:36px;left:50%;transform:translateX(-50%);white-space:nowrap;background:#1E3A8A;color:#fff;font-size:14px;font-weight:700;padding:4px 10px;border-radius:10px;box-shadow:0 2px 8px rgba(15,23,42,.25);pointer-events:none;direction:rtl}
+.me-street:empty{display:none}
+.pc-photo{width:56px;height:56px;border-radius:12px;object-fit:cover;flex-shrink:0;cursor:pointer}
+.c-actions{display:flex;gap:6px;align-items:center}
+.c-btn{height:36px;min-width:40px;border-radius:10px;border:1px solid #CBD5E1;background:#fff;display:flex;align-items:center;justify-content:center;padding:0 9px;text-decoration:none;color:var(--text);font-size:13px;font-weight:700;cursor:pointer}
+.c-btn.wa{background:#25D366;border-color:#25D366;color:#fff}
+.c-btn.call{color:var(--blue);border-color:#93C5FD}
+.c-row{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:14px}
+a.btn{text-decoration:none}
