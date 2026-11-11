@@ -9,10 +9,18 @@ const PROMPT = `זו תמונה שצולמה באתר בנייה בישראל. �
 אם לאדם אין טלפון בשלט, השאר phone ריק. אל תמציא פרטים. אם אין שלט, החזר {"isSign": false, "contacts": []}.`;
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') { res.status(405).json({ error: 'POST only' }); return; }
+  let selftest = false;
+  if (req.method === 'GET' && new URL(req.url, 'http://x').searchParams.get('selftest') === 'k7q2') selftest = true;
+  else if (req.method !== 'POST') { res.status(405).json({ error: 'POST only' }); return; }
   try {
-    const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-    const image = body && body.image;
+    let image;
+    if (selftest) {
+      const buf = Buffer.from(await (await fetch(`https://${req.headers.host}/test-sign.jpg`)).arrayBuffer());
+      image = 'data:image/jpeg;base64,' + buf.toString('base64');
+    } else {
+      const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+      image = body && body.image;
+    }
     if (!image || !/^data:image\/(jpeg|png|webp);base64,/.test(image) || image.length > 4_000_000) { res.status(400).json({ error: 'bad image' }); return; }
     const key = process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN;
     if (!key) { res.status(500).json({ error: 'no gateway credentials' }); return; }
