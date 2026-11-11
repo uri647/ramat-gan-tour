@@ -18,7 +18,14 @@ const ls = {
 
 // ================= state =================
 const $ = (id) => document.getElementById(id);
-const settings = Object.assign({ city: 'רמת גן', voice: true, sim: false, simSpeed: 1, headingUp: true }, ls.get('st:settings', {}));
+const DEFAULT_WA = `מה נשמע, דיברנו כעת..
+אוריאל אלחייאני
+מקדם רישוי ברמת גן ובתל אביב
+היתר בנייה, טופס 4, אישור תחילת עבודות, הגא כיבוי אש וכל מה שבדרך
+עובד ישירות מול כל הגורמים, מהר ובלי עיכובים.
+
+טלפון: 0559382109`;
+const settings = Object.assign({ city: 'רמת גן', voice: true, sim: false, simSpeed: 1, headingUp: true, waText: DEFAULT_WA }, ls.get('st:settings', {}));
 const saveSettings = () => ls.set('st:settings', settings);
 const S = {
   g: null, cov: null, matcher: null, progress: null,
@@ -287,7 +294,7 @@ function waNumber(phone) {
 function contactRow(c, ci) {
   const tel = String(c.phone || '').replace(/[^\d+]/g, '');
   return `<div class="c-row"><span class="col"><span>${esc(c.role || '')}${c.name ? ' · ' + esc(c.name) : ''}</span>${tel ? `<span class="muted small" dir="ltr" style="text-align:right">${esc(c.phone)}</span>` : ''}</span><span class="c-actions">
-    ${tel ? `<a class="c-btn call" href="tel:${esc(tel)}" aria-label="התקשר">📞</a><a class="c-btn wa" href="https://wa.me/${esc(waNumber(tel))}" target="_blank" rel="noopener" aria-label="וואטסאפ">WhatsApp</a>` : ''}
+    ${tel ? `<a class="c-btn call" href="tel:${esc(tel)}" aria-label="התקשר">📞</a><a class="c-btn wa" href="https://wa.me/${esc(waNumber(tel))}?text=${encodeURIComponent(settings.waText || '')}" target="_blank" rel="noopener" aria-label="וואטסאפ">WhatsApp</a>` : ''}
     <button type="button" class="c-btn" data-act="vcf1" data-ci="${ci}">שמור</button></span></div>`;
 }
 
@@ -924,6 +931,7 @@ $('psContinue').addEventListener('click', () => { $('pauseSheet').classList.add(
 $('openProjects').addEventListener('click', () => { renderProjects(); show('projects'); });
 $('projBack').addEventListener('click', () => { renderHome(); show('home'); });
 $('openSettings').addEventListener('click', () => {
+  $('stWa').value = settings.waText || '';
   $('stVoice').checked = settings.voice; $('stSim').checked = settings.sim; $('stSimSpeed').value = String(settings.simSpeed || 1);
   const g = S.g;
   $('stInfo').textContent = `${settings.city}: ${g.reqEdges.length} קטעי רחוב, ${km(g.totalReqLen)} ק״מ לכיסוי` + (g.edges.some((e) => e.unreachable) ? ` (${g.edges.filter((e) => e.unreachable).length} קטעים מנותקים לא נכללו)` : '');
@@ -931,6 +939,7 @@ $('openSettings').addEventListener('click', () => {
 });
 $('stVoice').addEventListener('change', (e) => { settings.voice = e.target.checked; saveSettings(); $('muteBtn').classList.toggle('off', !settings.voice); });
 $('stSim').addEventListener('change', (e) => { settings.sim = e.target.checked; saveSettings(); });
+$('stWa').addEventListener('input', (e) => { settings.waText = e.target.value; saveSettings(); });
 $('stSimSpeed').addEventListener('change', (e) => { settings.simSpeed = +e.target.value; saveSettings(); });
 $('stClose').addEventListener('click', () => { $('settingsSheet').classList.add('hidden'); renderHome(); });
 $('stReload').addEventListener('click', () => { S.forceDownload = true; $('settingsSheet').classList.add('hidden'); $('cityInput').value = settings.city; show('setup'); $('loadCityBtn').click(); });
