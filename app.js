@@ -72,6 +72,16 @@ async function overpass(q, status, timeoutMs = 90000) {
 }
 // street data baked into the site at build time (no external server needed)
 async function prebuiltList() { try { return await (await fetch('data/cities.json', { cache: 'no-cache' })).json(); } catch { return {}; } }
+async function newerPrebuilt(city, cached) {
+  try {
+    const m = await prebuiltList(); const f = m[city]; if (!f) return null;
+    const v = await (await fetch('data/versions.json', { cache: 'no-cache' })).json();
+    if (!v[f] || (cached && cached.builtAt === v[f])) return null;
+    const d = await (await fetch('data/' + f, { cache: 'no-cache' })).json();
+    await idb.set('graph:' + city, d);
+    return d;
+  } catch { return null; }
+}
 async function loadPrebuilt(city) {
   try {
     const m = await prebuiltList();
@@ -757,7 +767,7 @@ async function openArea(city) {
   settings.city = city; saveSettings();
   if (map) { map.remove(); map = null; meMarker = null; flagMarker = null; }
   let g = null;
-  try { const d = await idb.get('graph:' + city); if (d) g = C.deserializeGraph(d); } catch {}
+  try { let d = await idb.get('graph:' + city); if (d) { d = (await newerPrebuilt(city, d)) || d; g = C.deserializeGraph(d); } } catch {}
   if (!g) g = await loadPrebuilt(city);
   if (!g) return false;
   S.g = g; loadProgress(); await loadProjects(); renderHome(); show('home');
@@ -835,7 +845,8 @@ $('muteBtn').classList.toggle('off', !settings.voice);
 // ================= boot =================
 (async function boot() {
   try {
-    const d = await idb.get('graph:' + settings.city);
+    let d = await idb.get('graph:' + settings.city);
+    if (d) d = (await newerPrebuilt(settings.city, d)) || d; // keeps progress: it is stored by street id
     if (d) {
       S.g = C.deserializeGraph(d); loadProgress(); await loadProjects();
       renderHome(); show('home'); return;

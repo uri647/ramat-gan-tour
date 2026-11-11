@@ -125,7 +125,7 @@ export async function buildCity(city) {
 }
 
 if (isMain) {
-const manifest = {};
+const manifest = {}, versions = {};
 for (const city of CITIES) {
   try {
     console.log('Fetching', city.name);
@@ -133,7 +133,7 @@ for (const city of CITIES) {
     const data = serializeGraph(g);
     data.city = city.name; data.builtAt = new Date().toISOString();
     writeFileSync(`${out}/data/${city.file}`, JSON.stringify(data));
-    manifest[city.name] = city.file;
+    manifest[city.name] = city.file; versions[city.file] = data.builtAt;
     const names = [...new Set(g.reqEdges.map((e) => e.name).filter(Boolean))];
     console.log(`  streets (${names.length}): ${names.slice(0, 40).join(', ')}`);
     console.log(`  ok: ${g.reqEdges.length} street segments, ${(g.totalReqLen / 1000).toFixed(0)} km, ${g.edges.filter((e) => e.unreachable).length} unreachable`);
@@ -142,5 +142,6 @@ for (const city of CITIES) {
   }
 }
 writeFileSync(`${out}/data/cities.json`, JSON.stringify(manifest));
+writeFileSync(`${out}/data/versions.json`, JSON.stringify(versions));
 console.log('Build done:', Object.keys(manifest));
 }
