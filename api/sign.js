@@ -22,7 +22,7 @@ export default async function handler(req, res) {
       image = body && body.image;
     }
     if (!image || !/^data:image\/(jpeg|png|webp);base64,/.test(image) || image.length > 4_000_000) { res.status(400).json({ error: 'bad image' }); return; }
-    const key = process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN;
+    const key = process.env.AI_GATEWAY_API_KEY || req.headers['x-vercel-oidc-token'] || process.env.VERCEL_OIDC_TOKEN;
     if (!key) { res.status(500).json({ error: 'no gateway credentials' }); return; }
     const r = await fetch('https://ai-gateway.vercel.sh/v1/chat/completions', {
       method: 'POST',
