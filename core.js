@@ -313,6 +313,11 @@ export class Coverage {
     if (c >= need) { this.covered[id] = 1; this.bins.delete(id); return true; }
     return false;
   }
+  unsetCovered(id) {
+    const ids = [id, ...((this.g.twins && this.g.twins.get(id)) || [])];
+    for (const i of ids) { this.covered[i] = 0; this.bins.delete(i); }
+    return ids;
+  }
   setCovered(id) { if (!this.covered[id]) this.shadowTwins(id, 0, this.g.edges[id].len); this.covered[id] = 1; this.bins.delete(id); }
   keys() { const out = []; for (const e of this.g.edges) if (this.covered[e.id]) out.push(e.key); return out; }
   loadKeys(keys) { const s = new Set(keys); for (const e of this.g.edges) if (s.has(e.key)) this.covered[e.id] = 1; }

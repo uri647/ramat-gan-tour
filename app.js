@@ -164,6 +164,7 @@ function initMap() {
   const b = L.latLngBounds(S.g.reqEdges.map((e) => e.ll[0]));
   map.fitBounds(b);
   map.on('dragstart', () => { S.follow = false; });
+  map.on('click', onMapTap);
   setTimeout(() => map.invalidateSize(), 50);
 }
 function styleEdge(id) {
@@ -272,6 +273,61 @@ function renderOrient() {
     ? '<path d="M12 3l6 16-6-4-6 4z" fill="#2563EB" stroke="#2563EB"/>'
     : '<path d="M12 3l5 9h-10z" fill="#DC2626" stroke="#DC2626"/><path d="M7 12h10l-5 9z" fill="none"/><text x="12" y="23" font-size="0"></text>';
 }
+
+// ================= tap a street to mark it =================
+let selLine = null, selEdge = null, scTimer = null;
+function onMapTap(ev) {
+  const g = S.g, [x, y] = g.proj.toXY(ev.latlng.lat, ev.latlng.lng);
+  const z = map.getZoom(), R = z >= 17 ? 25 : z >= 15 ? 50 : 90;
+  const c = C.nearEdges(g, x, y, R).filter((m) => g.edges[m.e].req && !g.edges[m.e].unreachable).sort((a, b) => a.d - b.d)[0];
+  if (!c) { hideStreetCard(); return; }
+  showStreetCard(c.e);
+}
+function sameStreet(e) { return e.name ? S.g.reqEdges.filter((x) => x.name === e.name) : [e]; }
+function showStreetCard(id) {
+  const g = S.g, e = g.edges[id]; selEdge = id;
+  if (selLine) selLine.remove();
+  selLine = L.polyline(e.ll, { weight: 11, color: '#FACC15', opacity: 0.9, interactive: false }).addTo(map);
+  const all = sameStreet(e), doneAll = all.every((x) => S.cov.covered[x.id]);
+  const done = !!S.cov.covered[id];
+  $('scName').textContent = nameOf(e);
+  $('scInfo').textContent = `${Math.round(e.len)} מ׳ · ${done ? 'מסומן כנסוע' : 'עוד לא נסעת'}`;
+  $('scSeg').textContent = done ? 'בטל סימון' : 'סמן קטע כנסוע';
+  $('scAll').textContent = e.name ? (doneAll ? 'בטל את כל הרחוב' : 'סמן את כל הרחוב') : 'סגור';
+  $('streetCard').classList.remove('hidden');
+  // pause following briefly and bring the chosen street into view above the card
+  S.follow = false;
+  requestAnimationFrame(() => {
+    const mid = e.ll[Math.floor(e.ll.length / 2)], cp = map.latLngToContainerPoint(mid);
+    const top = $('banner').getBoundingClientRect().bottom, bottom = $('streetCard').getBoundingClientRect().top;
+    const want = L.point(map.getSize().x / 2, (top + bottom) / 2);
+    map.panBy(cp.subtract(want), { animate: true, duration: 0.35 });
+  });
+  clearTimeout(scTimer); scTimer = setTimeout(hideStreetCard, 12000);
+}
+function hideStreetCard() { if (!$('streetCard').classList.contains('hidden')) { S.follow = true; A.jump = true; } $('streetCard').classList.add('hidden'); if (selLine) { selLine.remove(); selLine = null; } selEdge = null; clearTimeout(scTimer); }
+function applyMark(ids, on) {
+  const changed = new Set();
+  for (const id of ids) {
+    if (on && !S.cov.covered[id]) { S.cov.setCovered(id); changed.add(id); for (const t of S.cov.takeTwinNewly()) changed.add(t); const tw = S.g.twins && S.g.twins.get(id); if (tw) for (const t of tw) { S.cov.setCovered(t); changed.add(t); } }
+    if (!on && S.cov.covered[id]) for (const t of S.cov.unsetCovered(id)) changed.add(t);
+  }
+  for (const id of changed) styleEdge(id);
+  saveProgress(true); renderNavStats();
+  if (S.mode !== 'idle') { S.lastEdge = -1; replan(); updateInstruction(); }
+  return changed.size;
+}
+$('scClose').addEventListener('click', hideStreetCard);
+$('scSeg').addEventListener('click', () => {
+  if (selEdge == null) return; const on = !S.cov.covered[selEdge];
+  applyMark([selEdge], on); toast(on ? 'הקטע סומן כנסוע' : 'הסימון בוטל'); hideStreetCard();
+});
+$('scAll').addEventListener('click', () => {
+  if (selEdge == null) return; const e = S.g.edges[selEdge];
+  if (!e.name) { hideStreetCard(); return; }
+  const all = sameStreet(e), on = !all.every((x) => S.cov.covered[x.id]);
+  applyMark(all.map((x) => x.id), on); toast(on ? `כל ${e.name} סומן כנסוע` : `בוטל הסימון של ${e.name}`); hideStreetCard();
+});
 
 // ================= voice =================
 let heVoice = null;

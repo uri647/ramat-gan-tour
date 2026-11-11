@@ -142,3 +142,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .proj-top img{cursor:pointer}
 .thumb{cursor:pointer}
 .mini-btn{height:32px;border-radius:9px;border:1px solid #93C5FD;background:#EFF6FF;color:#1D4ED8;padding:0 10px;font-size:13px;font-weight:700;cursor:pointer}
+
+.street-card{position:absolute;right:10px;left:10px;bottom:calc(240px + var(--sb));z-index:700;background:#fff;border:1px solid var(--line);border-radius:18px;padding:12px 14px;display:flex;flex-direction:column;gap:10px;box-shadow:0 8px 24px rgba(15,23,42,.18)}
+.street-card .btn{min-height:46px;font-size:15px;padding:0 10px}
+.icon-btn.small-x{width:36px;height:36px;font-size:15px}
