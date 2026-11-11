@@ -83,7 +83,8 @@ export function buildGraph(elements, requiredWayIds) {
     if (ids.length < 2) continue;
     const dir = onewayOf(w.tags);
     const name = w.tags.name || w.tags['name:he'] || '';
-    const req = requiredWayIds.has(w.id);
+    // ramps/slip lanes and highways are drivable but not "streets" to scout: route through them, don't require them
+    const req = requiredWayIds.has(w.id) && !/(_link$|^trunk$)/.test(w.tags.highway) && w.tags.junction !== 'roundabout' && w.tags.junction !== 'circular';
     const roundabout = w.tags.junction === 'roundabout' || w.tags.junction === 'circular';
     let start = 0;
     for (let i = 1; i < ids.length; i++) {
