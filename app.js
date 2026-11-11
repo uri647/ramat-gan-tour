@@ -714,6 +714,7 @@ function openProject() {
   const street = m ? g.edges[m.e].name : '';
   draft = { id: Date.now(), lat: ll[0], lon: ll[1], street, address: street ? `${street}, ${settings.city}` : settings.city, created: new Date().toISOString(), stage: '', contacts: [{ role: 'קבלן', name: '', phone: '' }], note: '', photos: [] };
   $('pjAddress').value = draft.address; $('pjNote').value = '';
+  $('pjSignStatus').classList.add('hidden');
   renderDraft();
   $('projectSheet').classList.remove('hidden');
   // better address (house number) from OpenStreetMap, if online
@@ -739,8 +740,32 @@ $('pjContacts').addEventListener('input', (ev) => { const f = ev.target.dataset.
 $('pjAddContact').addEventListener('click', () => { draft.contacts.push({ role: 'יזם', name: '', phone: '' }); renderDraft(); });
 $('pjPhotoInput').addEventListener('change', async (ev) => {
   const f = ev.target.files && ev.target.files[0]; ev.target.value = ''; if (!f) return;
-  try { draft.photos.push(await shrinkImage(f, 1280)); renderDraft(); } catch { toast('לא הצלחתי לטעון את התמונה'); }
+  try { const img = await shrinkImage(f, 1600); draft.photos.push(img); renderDraft(); readSign(img); } catch { toast('לא הצלחתי לטעון את התמונה'); }
 });
+// Send a photo to the server to read a site sign; fill the contacts it finds.
+async function readSign(img) {
+  const d = draft; if (!d) return;
+  const st = $('pjSignStatus'); st.textContent = 'קורא פרטים מהשלט…'; st.classList.remove('hidden');
+  try {
+    const r = await fetch('/api/sign', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image: img }) });
+    const j = await r.json();
+    if (draft !== d) return; // sheet was closed
+    if (!r.ok) throw new Error(j.error || 'error');
+    const found = j.contacts || [];
+    if (!found.length) { st.textContent = j.isSign ? 'לא מצאתי אנשי קשר בשלט' : ''; if (!j.isSign) st.classList.add('hidden'); return; }
+    // replace the empty placeholder contacts, skip phones we already have
+    d.contacts = d.contacts.filter((c) => c.name || c.phone);
+    const have = new Set(d.contacts.map((c) => (c.phone || '').replace(/\D/g, '')).filter(Boolean));
+    let added = 0;
+    for (const c of found) { const ph = (c.phone || '').replace(/\D/g, ''); if (ph && have.has(ph)) continue; d.contacts.push(c); if (ph) have.add(ph); added++; }
+    if (!d.contacts.length) d.contacts.push({ role: 'קבלן', name: '', phone: '' });
+    if (j.project && !$('pjNote').value) $('pjNote').value = j.project;
+    renderDraft();
+    st.textContent = `מילאתי ${added} אנשי קשר מהשלט. כדאי לעבור עליהם לפני השמירה`;
+  } catch (e) {
+    if (draft === d) st.textContent = 'לא הצלחתי לקרוא את השלט כרגע. אפשר להקליד ידנית';
+  }
+}
 function shrinkImage(file, max) {
   return new Promise((res, rej) => {
     const url = URL.createObjectURL(file), img = new Image();

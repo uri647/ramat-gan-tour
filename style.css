@@ -157,3 +157,4 @@ button,input,select,textarea{font:inherit;color:inherit}
 .c-btn.call{color:var(--blue);border-color:#93C5FD}
 .c-row{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:14px}
 a.btn{text-decoration:none}
+.sign-status{background:#EFF6FF;border:1px solid #BFDBFE;color:#1E3A8A;border-radius:12px;padding:10px 12px;font-size:14px;font-weight:600}
