@@ -109,6 +109,9 @@
     <button class="icon-btn float" id="muteBtn" aria-label="השתק הוראות קוליות">
       <svg id="muteIcon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M11 5L6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg>
     </button>
+    <button class="icon-btn float" id="areasBtn" aria-label="בחר שכונה להתמקד בה">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2z"/><path d="M9 4v14M15 6v14"/></svg>
+    </button>
     <button class="icon-btn float" id="homeBtn" aria-label="כסה רחובות בדרך הביתה">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z" fill="none"/></svg>
     </button>
@@ -147,7 +150,7 @@
     <div class="grip"></div>
     <div class="row between center-y">
       <div class="col"><span class="muted small">היום</span><b class="stat" id="navToday">0 ק״מ · 0 רחובות</b></div>
-      <div class="col end"><span class="muted small">כל העיר</span><b class="stat green" id="navPct">0%</b></div>
+      <div class="col end"><span class="muted small" id="navPctLabel">כל העיר</span><b class="stat green" id="navPct">0%</b></div>
     </div>
     <div class="bar"><div id="navBar"></div></div>
     <div class="row gap10 legend">
@@ -282,6 +285,18 @@
     <button class="btn secondary" id="stCity">החלף אזור (רמת גן / כפר גנים)</button>
     <button class="btn danger" id="stReset">אפס את ההתקדמות</button>
     <button class="btn primary" id="stClose">סגור</button>
+  </div>
+</div>
+
+<!-- ===== Neighbourhood focus ===== -->
+<div id="areaSheet" class="overlay hidden">
+  <div class="sheet col gap10">
+    <div class="grip"></div>
+    <div class="row between center-y"><h2>במה להתמקד היום?</h2><button class="icon-btn small-x" id="asClose" aria-label="סגור">✕</button></div>
+    <button class="area-item" data-focus="all"><b>כל העיר</b><span class="muted small">בלי מיקוד</span></button>
+    <button class="area-item" data-focus="view"><b>האזור שמוצג עכשיו על המסך</b><span class="muted small">הקטן את המפה, מקם אותה ולחץ כאן</span></button>
+    <div class="muted small" style="margin-top:6px">שכונות</div>
+    <div id="hoodList" class="col gap8 hood-list"></div>
   </div>
 </div>
 

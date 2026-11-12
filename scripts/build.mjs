@@ -43,10 +43,18 @@ const unxml = (s) => s.replace(/&(#x[0-9a-f]+|#\d+|\w+);/gi, (m, e) => e[0] === 
 const attr = (s, k) => { const m = s.match(new RegExp(`(?:^|\\s)${k}="([^"]*)"`)); return m ? unxml(m[1]) : null; };
 
 /** Parse OSM XML: collects all nodes (lat/lon) and road ways into the maps. */
-export function parseOsm(xml, nodes, ways) {
+export function parseOsm(xml, nodes, ways, places) {
   for (const m of xml.matchAll(/<node\s([^>]*?)\/?>/g)) {
     const id = +attr(m[1], 'id'), lat = +attr(m[1], 'lat'), lon = +attr(m[1], 'lon');
     if (id && !isNaN(lat)) nodes.set(id, [lat, lon]);
+  }
+  // neighbourhood name points (place=neighbourhood / suburb / quarter)
+  if (places) for (const m of xml.matchAll(/<node\s([^>]*[^/])>([\s\S]*?)<\/node>/g)) {
+    const tags = {};
+    for (const t of m[2].matchAll(/<tag\s([^>]*?)\/>/g)) tags[attr(t[1], 'k')] = attr(t[1], 'v');
+    if (/^(neighbourhood|suburb|quarter)$/.test(tags.place || '') && (tags['name:he'] || tags.name)) {
+      places.set(+attr(m[1], 'id'), { name: tags['name:he'] || tags.name, lat: +attr(m[1], 'lat'), lon: +attr(m[1], 'lon') });
+    }
   }
   for (const m of xml.matchAll(/<way\s([^>]*?)>([\s\S]*?)<\/way>/g)) {
     const body = m[2];
@@ -72,15 +80,15 @@ function pointInPoly(lat, lon, geo) {
   return inside;
 }
 
-async function fetchTile(s, w, n, e, nodes, ways, depth = 0) {
+async function fetchTile(s, w, n, e, nodes, ways, places, depth = 0) {
   const r = await get(`https://api.openstreetmap.org/api/0.6/map?bbox=${w.toFixed(5)},${s.toFixed(5)},${e.toFixed(5)},${n.toFixed(5)}`, 90000);
   if (r.status === 400 && depth < 3) { // too many nodes: split in four
     const ml = (s + n) / 2, mo = (w + e) / 2;
-    for (const [a, b, c, d] of [[s, w, ml, mo], [s, mo, ml, e], [ml, w, n, mo], [ml, mo, n, e]]) await fetchTile(a, b, c, d, nodes, ways, depth + 1);
+    for (const [a, b, c, d] of [[s, w, ml, mo], [s, mo, ml, e], [ml, w, n, mo], [ml, mo, n, e]]) await fetchTile(a, b, c, d, nodes, ways, places, depth + 1);
     return;
   }
   if (r.status !== 200) throw new Error('tile failed ' + r.status);
-  parseOsm(r.text, nodes, ways);
+  parseOsm(r.text, nodes, ways, places);
 }
 
 export async function buildCity(city) {
@@ -109,11 +117,11 @@ export async function buildCity(city) {
   const tiles = [];
   for (let s = S0; s < N0; s += T) for (let w = W0; w < E0; w += T) tiles.push([s, w, Math.min(s + T, N0), Math.min(w + T, E0)]);
   console.log(`  boundary ok, ${tiles.length} tiles`);
-  const nodes = new Map(), ways = new Map();
+  const nodes = new Map(), ways = new Map(), places = new Map();
   let done = 0;
   const queue = tiles.slice();
   await Promise.all([0, 1, 2, 3].map(async () => {
-    while (queue.length) { const t = queue.shift(); await fetchTile(...t, nodes, ways); done++; if (done % 10 === 0) console.log(`  ${done}/${tiles.length} tiles`); }
+    while (queue.length) { const t = queue.shift(); await fetchTile(...t, nodes, ways, places); done++; if (done % 10 === 0) console.log(`  ${done}/${tiles.length} tiles`); }
   }));
   const req = new Set();
   for (const w of ways.values()) if (w.nodes.some((id) => { const ll = nodes.get(id); return ll && inside(ll[0], ll[1]); })) req.add(w.id);
@@ -121,6 +129,8 @@ export async function buildCity(city) {
   for (const [id, [lat, lon]] of nodes) elements.push({ type: 'node', id, lat, lon });
   for (const w of ways.values()) elements.push(w);
   const g = buildGraph(elements, req);
+  const seen = new Set();
+  g.places = [...places.values()].filter((p) => inside(p.lat, p.lon) && !seen.has(p.name) && seen.add(p.name));
   return g;
 }
 
@@ -131,10 +141,11 @@ for (const city of CITIES) {
     console.log('Fetching', city.name);
     const g = await buildCity(city);
     const data = serializeGraph(g);
-    data.city = city.name; data.builtAt = new Date().toISOString();
+    data.city = city.name; data.builtAt = new Date().toISOString(); data.places = g.places || [];
     writeFileSync(`${out}/data/${city.file}`, JSON.stringify(data));
     manifest[city.name] = city.file; versions[city.file] = data.builtAt;
     const names = [...new Set(g.reqEdges.map((e) => e.name).filter(Boolean))];
+    console.log(`  neighbourhoods (${(g.places || []).length}): ${(g.places || []).map((p) => p.name).join(', ')}`);
     console.log(`  streets (${names.length}): ${names.slice(0, 40).join(', ')}`);
     console.log(`  ok: ${g.reqEdges.length} street segments, ${(g.totalReqLen / 1000).toFixed(0)} km, ${g.edges.filter((e) => e.unreachable).length} unreachable`);
   } catch (e) {

@@ -211,7 +211,7 @@ export function deserializeGraph(d) {
     let len = 0; for (let k = 1; k < pts.length; k++) len += hyp(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]);
     return { id, key, a, b, pts, ll, len, name, dir, req: !!req, roundabout: !!rb, skip: false };
   });
-  const g = { proj, nodes, edges };
+  const g = { proj, nodes, edges, places: d.places || [] };
   finalizeGraph(g);
   return g;
 }
@@ -473,13 +473,13 @@ export function routeToNode(g, sources, target) {
 }
 
 /** Find the next uncovered required arc reachable from sources (greedy nearest, with turn-aware tie-break). */
-export function nextTarget(g, cov, sources, extraDone, bias) {
+export function nextTarget(g, cov, sources, extraDone, bias, allowed) {
   let best = null, bestScore = Infinity, stopAt = Infinity;
   const res = search(g, sources, (u, du, id) => {
     if (du > stopAt) return true;
     for (const arc of g.out[u]) {
       const e = g.edges[arc.e];
-      if (!e.req || e.unreachable || e.skip || cov.covered[e.id] || (extraDone && extraDone.has(e.id))) continue;
+      if (!e.req || e.unreachable || e.skip || cov.covered[e.id] || (extraDone && extraDone.has(e.id)) || (allowed && !allowed.has(e.id))) continue;
       let score = du;
       if (id !== null) score += turnCost(turnDeg(id, arcStartDir(g, e, arc.fwd)));
       // prefer finishing dead-end-ish / isolated streets so nothing is left behind
@@ -499,10 +499,10 @@ export function nextTarget(g, cov, sources, extraDone, bias) {
 }
 
 /** Plan ahead greedily up to maxLen meters. Returns steps [{e,fwd,target}] */
-export function planAhead(g, cov, sources, maxLen = 3000, maxTargets = 80, bias = null) {
+export function planAhead(g, cov, sources, maxLen = 3000, maxTargets = 80, bias = null, allowed = null) {
   const plan = []; const tmp = new Set(); let len = 0; let src = sources; let targets = 0;
   while (len < maxLen && targets < maxTargets) {
-    const seg = nextTarget(g, cov, src, tmp, bias);
+    const seg = nextTarget(g, cov, src, tmp, bias, allowed);
     if (!seg) break;
     for (const s of seg) {
       plan.push(s); len += g.edges[s.e].len;

@@ -158,3 +158,8 @@ button,input,select,textarea{font:inherit;color:inherit}
 .c-row{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:14px}
 a.btn{text-decoration:none}
 .sign-status{background:#EFF6FF;border:1px solid #BFDBFE;color:#1E3A8A;border-radius:12px;padding:10px 12px;font-size:14px;font-weight:600}
+
+.area-item{display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;text-align:right;background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px 14px;font-size:15px;cursor:pointer}
+.area-item.on{border-color:var(--blue);background:#EFF6FF}
+.hood-list{max-height:46vh;overflow-y:auto}
+.hood-pct{font-weight:700;color:var(--green);white-space:nowrap}

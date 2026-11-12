@@ -50,6 +50,7 @@ function loadProgress() {
   const sk = new Set(S.progress.skipped);
   for (const e of S.g.edges) e.skip = sk.has(e.key);
   S.matcher = new C.Matcher(S.g, S.cov);
+  S.hoods = computeHoods(); restoreFocus();
 }
 let saveT = null;
 function saveProgress(now) {
@@ -181,9 +182,11 @@ function initMap() {
 function styleEdge(id) {
   const l = edgeLines[id]; if (!l) return;
   const e = S.g.edges[id];
-  if (S.cov.covered[id]) l.setStyle({ color: COLORS.done, weight: 5, dashArray: null });
-  else if (e.skip) l.setStyle({ color: COLORS.skip, weight: 4, dashArray: '6 6' });
-  else l.setStyle({ color: COLORS.todo, weight: 5, dashArray: null });
+  const out = S.focus && !S.focus.ids.has(id);
+  const op = out ? 0.28 : 0.9, w = out ? 3 : 5;
+  if (S.cov.covered[id]) l.setStyle({ color: COLORS.done, weight: w, dashArray: null, opacity: op });
+  else if (e.skip) l.setStyle({ color: COLORS.skip, weight: w - 1, dashArray: '6 6', opacity: op });
+  else l.setStyle({ color: COLORS.todo, weight: w, dashArray: null, opacity: op });
 }
 function renderProjMarkers() {
   if (!projLayer) return;
@@ -333,6 +336,63 @@ $('pcEdit').addEventListener('click', () => {
   $('projectSheet').classList.remove('hidden'); S.editIndex = i;
 });
 
+// ================= neighbourhood focus =================
+function computeHoods() {
+  const g = S.g, places = (g.places || []).map((p) => { const [x, y] = g.proj.toXY(p.lat, p.lon); return { name: p.name, x, y, ids: new Set() }; });
+  if (!places.length) return [];
+  for (const e of g.reqEdges) {
+    const [mx, my] = e.pts[Math.floor(e.pts.length / 2)];
+    let best = null, bd = Infinity;
+    for (const p of places) { const d = Math.hypot(p.x - mx, p.y - my); if (d < bd) { bd = d; best = p; } }
+    if (best && bd < 2500) best.ids.add(e.id);
+  }
+  return places.filter((p) => p.ids.size >= 5).sort((a, b) => a.name.localeCompare(b.name, 'he'));
+}
+function viewPolygon() {
+  const sz = map.getSize(), top = $('banner').getBoundingClientRect().bottom, bottom = document.querySelector('.nav-panel').getBoundingClientRect().top;
+  return [[0, top], [sz.x, top], [sz.x, bottom], [0, bottom]].map(([x, y]) => { const ll = map.containerPointToLatLng([x, y]); return [ll.lat, ll.lng]; });
+}
+function idsInPolygon(poly) {
+  const g = S.g, P = poly.map(([la, lo]) => g.proj.toXY(la, lo)), ids = new Set();
+  const inside = (x, y) => { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const [xi, yi] = P[i], [xj, yj] = P[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c; } return c; };
+  for (const e of g.reqEdges) { const [mx, my] = e.pts[Math.floor(e.pts.length / 2)]; if (inside(mx, my)) ids.add(e.id); }
+  return ids;
+}
+function setFocus(f, silent) {
+  S.focus = f && f.ids && f.ids.size ? f : null; S.focusDoneSaid = false;
+  S.progress.focus = S.focus ? { type: S.focus.type, name: S.focus.name, poly: S.focus.poly || null } : null;
+  saveProgress(true);
+  if (map) for (const e of S.g.reqEdges) styleEdge(e.id);
+  renderNavStats(); $('areasBtn').classList.toggle('on', !!S.focus);
+  if (S.mode !== 'idle') { S.lastEdge = -1; replan(); updateInstruction(); }
+  if (!silent) toast(S.focus ? `מתמקד ב${S.focus.name}: ${focusPct(S.focus.ids)}% כבר נסעת` : 'חזרה לכל העיר');
+}
+function restoreFocus() {
+  const f = S.progress.focus; S.focus = null; if (!f) return;
+  if (f.type === 'hood') { const h = (S.hoods || []).find((x) => x.name === f.name); if (h) S.focus = { type: 'hood', name: h.name, ids: h.ids }; }
+  else if (f.type === 'view' && f.poly) S.focus = { type: 'view', name: f.name || 'אזור שבחרת', poly: f.poly, ids: idsInPolygon(f.poly) };
+}
+function openAreas() {
+  const cur = S.focus ? S.focus.name : null;
+  $('hoodList').innerHTML = (S.hoods || []).map((h, i) => `<button class="area-item ${cur === h.name ? 'on' : ''}" data-hood="${i}"><b>${esc(h.name)}</b><span class="hood-pct">${focusPct(h.ids)}%</span></button>`).join('') || '<span class="muted small">אין שמות שכונות במפה לאזור הזה. אפשר להשתמש ב"האזור שמוצג על המסך"</span>';
+  document.querySelector('[data-focus="all"]').classList.toggle('on', !S.focus);
+  document.querySelector('[data-focus="view"]').classList.toggle('on', !!S.focus && S.focus.type === 'view');
+  $('areaSheet').classList.remove('hidden');
+}
+$('areasBtn').addEventListener('click', openAreas);
+$('asClose').addEventListener('click', () => $('areaSheet').classList.add('hidden'));
+$('areaSheet').addEventListener('click', (ev) => {
+  if (ev.target.id === 'areaSheet') { $('areaSheet').classList.add('hidden'); return; }
+  const b = ev.target.closest('.area-item'); if (!b) return;
+  $('areaSheet').classList.add('hidden');
+  if (b.dataset.focus === 'all') setFocus(null);
+  else if (b.dataset.focus === 'view') {
+    const poly = viewPolygon(), ids = idsInPolygon(poly);
+    if (!ids.size) { toast('אין רחובות באזור שעל המסך'); return; }
+    setFocus({ type: 'view', name: 'אזור שבחרת', poly, ids });
+  } else { const h = S.hoods[+b.dataset.hood]; setFocus({ type: 'hood', name: h.name, ids: h.ids }); }
+});
+
 // ================= drive toward home =================
 async function getHome() {
   const addr = settings.homeAddr || '';
@@ -440,6 +500,7 @@ async function startNav(mode) {
     if (!S.target) S.mode = 'cover';
   } else S.target = null;
   setFlag(S.mode === 'toPoint' ? S.target : null);
+  $('areasBtn').classList.toggle('on', !!S.focus);
   $('legendPlan').style.background = S.mode === 'toPoint' ? COLORS.toPoint : COLORS.plan;
   setBanner('gray', '', S.mode === 'toPoint' ? 'מחפש מיקום… אחר כך ננווט לנקודת ההמשך' : 'מחפש מיקום GPS…');
   renderNavStats();
@@ -603,7 +664,7 @@ function replan() {
   if (S.mode === 'cover') {
     let best = null;
     for (const s of src) {
-      const p = C.planAhead(g, S.cov, [s], 2500, 80, homeBias());
+      const p = C.planAhead(g, S.cov, [s], 2500, 80, homeBias(), S.focus ? S.focus.ids : null);
       // score: distance until first new coverage
       let toFirst = s.dist; for (const st of p) { if (st.target) break; toFirst += g.edges[st.e].len; }
       const curUncovered = !S.cov.covered[s.cur.e] && g.edges[s.cur.e].req && !g.edges[s.cur.e].skip;
@@ -639,8 +700,10 @@ function setBanner(color, distText, text, icon) {
 function updateInstruction() {
   const g = S.g;
   const color = S.mode === 'toPoint' ? 'purple' : 'blue';
-  if (S.mode === 'cover' && S.steps.length <= 1 && S.cov.remaining().length === 0) {
-    setBanner('green', '', 'כל הכבוד! עברת בכל רחובות העיר'); $('thenChip').classList.add('hidden'); return;
+  if (S.mode === 'cover' && S.steps.length <= 1 && focusRemaining() === 0) {
+    setBanner('green', '', S.focus ? `כל הכבוד! סיימת את ${S.focus.name}` : 'כל הכבוד! עברת בכל רחובות העיר'); $('thenChip').classList.add('hidden');
+    if (S.focus && !S.focusDoneSaid) { S.focusDoneSaid = true; say(`סיימת את ${S.focus.name}`); }
+    return;
   }
   const base = remainingOnCur();
   const man = S.maneuvers[0];
@@ -666,8 +729,18 @@ function updateInstruction() {
   else if (dist <= 45 && !a.near) { a.near = a.far = true; say(man.text); }
 }
 
+function focusRemaining() {
+  if (!S.focus) return S.cov.remaining().length;
+  let n = 0; for (const id of S.focus.ids) { const e = S.g.edges[id]; if (!S.cov.covered[id] && !e.skip) n++; } return n;
+}
+function focusPct(ids) {
+  let t = 0, d = 0; for (const id of ids) { const e = S.g.edges[id]; t += e.len; if (S.cov.covered[id] || e.skip) d += e.len; }
+  return t ? Math.floor(d / t * 100) : 0;
+}
 function renderNavStats() {
-  const d = dayStats(), pct = Math.floor(S.cov.coveredLen() / S.g.totalReqLen * 1000) / 10;
+  const d = dayStats();
+  const pct = S.focus ? focusPct(S.focus.ids) : Math.floor(S.cov.coveredLen() / S.g.totalReqLen * 1000) / 10;
+  $('navPctLabel').textContent = S.focus ? S.focus.name : 'כל העיר';
   $('navToday').textContent = `${km(d.m)} ק״מ · ${d.streets} רחובות`;
   $('navPct').textContent = pct.toFixed(pct < 10 ? 1 : 0) + '%';
   $('navBar').style.width = pct + '%';
