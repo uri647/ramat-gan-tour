@@ -473,7 +473,7 @@ export function routeToNode(g, sources, target) {
 }
 
 /** Find the next uncovered required arc reachable from sources (greedy nearest, with turn-aware tie-break). */
-export function nextTarget(g, cov, sources, extraDone) {
+export function nextTarget(g, cov, sources, extraDone, bias) {
   let best = null, bestScore = Infinity, stopAt = Infinity;
   const res = search(g, sources, (u, du, id) => {
     if (du > stopAt) return true;
@@ -487,7 +487,8 @@ export function nextTarget(g, cov, sources, extraDone) {
       let pending = 0;
       for (const a2 of g.out[endNode]) { const e2 = g.edges[a2.e]; if (e2.req && !e2.skip && !cov.covered[e2.id] && a2.e !== e.id && !(extraDone && extraDone.has(a2.e))) pending++; }
       if (pending === 0) score -= 15;
-      if (score < bestScore) { bestScore = score; best = { node: u, arc }; stopAt = du + 60; }
+      if (bias) score += bias(endNode);
+      if (score < bestScore) { bestScore = score; best = { node: u, arc }; stopAt = du + (bias ? 700 : 60); }
     }
     return false;
   });
@@ -498,10 +499,10 @@ export function nextTarget(g, cov, sources, extraDone) {
 }
 
 /** Plan ahead greedily up to maxLen meters. Returns steps [{e,fwd,target}] */
-export function planAhead(g, cov, sources, maxLen = 3000, maxTargets = 80) {
+export function planAhead(g, cov, sources, maxLen = 3000, maxTargets = 80, bias = null) {
   const plan = []; const tmp = new Set(); let len = 0; let src = sources; let targets = 0;
   while (len < maxLen && targets < maxTargets) {
-    const seg = nextTarget(g, cov, src, tmp);
+    const seg = nextTarget(g, cov, src, tmp, bias);
     if (!seg) break;
     for (const s of seg) {
       plan.push(s); len += g.edges[s.e].len;

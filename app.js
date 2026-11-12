@@ -25,7 +25,7 @@ const DEFAULT_WA = `מה נשמע, דיברנו כעת..
 עובד ישירות מול כל הגורמים, מהר ובלי עיכובים.
 
 טלפון: 0559382109`;
-const settings = Object.assign({ city: 'רמת גן', voice: true, sim: false, simSpeed: 1, headingUp: true, waText: DEFAULT_WA }, ls.get('st:settings', {}));
+const settings = Object.assign({ city: 'רמת גן', voice: true, sim: false, simSpeed: 1, headingUp: true, waText: DEFAULT_WA, homeAddr: 'לוחמי הגטו 2, פתח תקווה' }, ls.get('st:settings', {}));
 const saveSettings = () => ls.set('st:settings', settings);
 const S = {
   g: null, cov: null, matcher: null, progress: null,
@@ -43,7 +43,10 @@ const progKey = () => 'st:prog:' + settings.city;
 function loadProgress() {
   S.progress = Object.assign({ covered: [], skipped: [], pause: null, days: {} }, ls.get(progKey(), {}));
   S.cov = new C.Coverage(S.g);
-  S.cov.loadKeys(S.progress.covered);
+  // a street driven while another area was selected counts here too (same street ids)
+  const keys = new Set(S.progress.covered);
+  try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('st:prog:') && k !== progKey()) for (const x of (ls.get(k, {}).covered || [])) keys.add(x); } } catch {}
+  S.cov.loadKeys([...keys]);
   const sk = new Set(S.progress.skipped);
   for (const e of S.g.edges) e.skip = sk.has(e.key);
   S.matcher = new C.Matcher(S.g, S.cov);
@@ -171,6 +174,7 @@ function initMap() {
   const b = L.latLngBounds(S.g.reqEdges.map((e) => e.ll[0]));
   map.fitBounds(b);
   map.on('dragstart', () => { S.follow = false; });
+  map.on('moveend zoomend', () => { if (!S.follow && S.g) refreshVisibleEdges(); });
   map.on('click', onMapTap);
   setTimeout(() => map.invalidateSize(), 50);
 }
@@ -254,11 +258,14 @@ function frame(now) {
   // let tiles / street lines refresh a few times per second, not every frame
   if (A.dirty && now - A.lastEnd > 450) { A.dirty = false; A.lastEnd = now; map.fire('moveend'); }
   // only draw streets near the driver (keeps redraws cheap on the phone)
-  if (!A.visC || now - A.visT > 4000 || Math.hypot(A.disp[0] - A.visC[0], A.disp[1] - A.visC[1]) > 250) refreshVisibleEdges();
+  if (S.follow && (!A.visC || now - A.visT > 4000 || Math.hypot(A.disp[0] - A.visC[0], A.disp[1] - A.visC[1]) > 250)) refreshVisibleEdges();
 }
 function refreshVisibleEdges() {
-  A.visC = A.disp.slice(); A.visT = performance.now();
-  const R = 1600;
+  // around the center of what is on screen; radius covers the whole (rotated) view
+  const c = map.getCenter(), b = map.getBounds();
+  A.visC = S.g.proj.toXY(c.lat, c.lng); A.visT = performance.now();
+  const [nx, ny] = S.g.proj.toXY(b.getNorth(), b.getEast());
+  const R = Math.max(1600, Math.hypot(nx - A.visC[0], ny - A.visC[1]) * 1.3);
   for (const e of S.g.reqEdges) {
     const l = edgeLines[e.id]; if (!l) continue;
     const p = e.pts[0], q = e.pts[e.pts.length - 1];
@@ -325,6 +332,35 @@ $('pcEdit').addEventListener('click', () => {
   $('pjAddress').value = draft.address; $('pjNote').value = draft.note || ''; renderDraft();
   $('projectSheet').classList.remove('hidden'); S.editIndex = i;
 });
+
+// ================= drive toward home =================
+async function getHome() {
+  const addr = settings.homeAddr || '';
+  if (settings.homeLL && settings.homeLL.addr === addr) return settings.homeLL;
+  const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=il&q=${encodeURIComponent(addr)}`);
+  const j = await r.json(); if (!j[0]) throw new Error('not found');
+  settings.homeLL = { addr, lat: +j[0].lat, lon: +j[0].lon }; saveSettings();
+  return settings.homeLL;
+}
+async function toggleHome() {
+  if (S.homeMode) { S.homeMode = false; renderHomeBtn(); toast('חזרה לסיור רגיל'); S.lastEdge = -1; replan(); updateInstruction(); return; }
+  try {
+    const h = await getHome();
+    const [hx, hy] = S.g.proj.toXY(h.lat, h.lon);
+    let node = -1, bd = Infinity;
+    S.g.nodes.forEach((n, i) => { if (S.g.out[i].length && S.g.comp[i] === S.g.mainComp) { const d = Math.hypot(n.x - hx, n.y - hy); if (d < bd) { bd = d; node = i; } } });
+    S.home = { ...h, x: hx, y: hy, node: bd < 300 ? node : -1 };
+    S.homeMode = true; renderHomeBtn();
+    toast(S.home.node >= 0 ? 'מכסה רחובות בדרך הביתה' : 'הבית מחוץ לאזור הזה. אכסה רחובות בכיוון, ובסוף תוכל להמשיך עם Waze', 4000);
+    S.lastEdge = -1; replan(); updateInstruction();
+  } catch { toast('לא מצאתי את כתובת הבית. אפשר לתקן אותה בהגדרות'); }
+}
+function homeBias() {
+  if (!S.homeMode || !S.home) return null;
+  const g = S.g, h = S.home;
+  return (n) => Math.hypot(g.nodes[n].x - h.x, g.nodes[n].y - h.y) * 1.0;
+}
+function renderHomeBtn() { $('homeBtn').classList.toggle('on', !!S.homeMode); $('homeBtn').querySelector('path').setAttribute('fill', S.homeMode ? '#2563EB' : 'none'); }
 
 // ================= tap a street to mark it =================
 let selLine = null, selEdge = null, scTimer = null;
@@ -516,6 +552,7 @@ function fillGap(a, b, gapSec, r) {
 
 function offGraphTarget() {
   if (S.mode === 'toPoint' && S.target) return S.target;
+  if (S.homeMode && S.home) return { lat: S.home.lat, lon: S.home.lon, label: 'הבית' };
   // nearest uncovered street (straight-line) to the current position
   if (!S.lastFix) return null;
   let best = null, bd = Infinity;
@@ -549,10 +586,24 @@ function replan() {
     if (best) { rest = best.p; cur = best.s.cur; }
     else { S.mode = 'cover'; S.target = null; setFlag(null); }
   }
+  // toward home: once close, just drive home
+  if (S.mode === 'cover' && S.homeMode && S.home) {
+    const [mx, my] = [m.qx, m.qy];
+    const dh = Math.hypot(mx - S.home.x, my - S.home.y);
+    if (dh < 60) { S.homeMode = false; renderHomeBtn(); say('הגעת הביתה'); toast('הגעת הביתה'); }
+    else if (dh < 400 && S.home.node >= 0) {
+      let bestH = null;
+      for (const s of src) { const p = C.routeToNode(g, [s], S.home.node); if (p) { const L = s.dist + C.pathLength(g, p, 0, p.length); if (!bestH || L < bestH.L) bestH = { p, L, s }; } }
+      if (bestH) {
+        S.steps = [bestH.s.cur, ...bestH.p]; S.curPos = m.pos; S.maneuvers = C.buildManeuvers(g, S.steps);
+        planLine.setStyle({ color: COLORS.toPoint }); planLine.setLatLngs(C.stepsToLatLngs(g, S.steps, m.pos)); return;
+      }
+    }
+  }
   if (S.mode === 'cover') {
     let best = null;
     for (const s of src) {
-      const p = C.planAhead(g, S.cov, [s], 2500);
+      const p = C.planAhead(g, S.cov, [s], 2500, 80, homeBias());
       // score: distance until first new coverage
       let toFirst = s.dist; for (const st of p) { if (st.target) break; toFirst += g.edges[st.e].len; }
       const curUncovered = !S.cov.covered[s.cur.e] && g.edges[s.cur.e].req && !g.edges[s.cur.e].skip;
@@ -606,6 +657,7 @@ function updateInstruction() {
   const chip = $('thenChip');
   if (next && C.pathLength(g, S.steps, man.stepIndex, next.stepIndex) < 400) { chip.textContent = 'אחר כך: ' + next.text; chip.classList.remove('hidden'); }
   else if (S.mode === 'toPoint') { chip.textContent = `בדרך לנקודת ההמשך · ${fmtDist(base + C.pathLength(g, S.steps, 1, S.steps.length))}`; chip.classList.remove('hidden'); }
+  else if (S.homeMode && S.home && S.lastFix) { chip.textContent = `🏠 בדרך הביתה · ${fmtDist(Math.hypot(S.lastFix.x - S.home.x, S.lastFix.y - S.home.y))} באוויר`; chip.classList.remove('hidden'); }
   else chip.classList.add('hidden');
   // voice
   const key = (g.edges[S.steps[man.stepIndex].e].key) + man.text;
@@ -942,6 +994,7 @@ $('nearestBtn').addEventListener('click', () => startNav('cover'));
 $('pauseBtn').addEventListener('click', pauseHere);
 $('foundBtn').addEventListener('click', openProject);
 $('blockedBtn').addEventListener('click', skipNext);
+$('homeBtn').addEventListener('click', toggleHome);
 $('recenterBtn').addEventListener('click', () => { S.follow = true; A.jump = true; });
 $('orientBtn').addEventListener('click', () => {
   settings.headingUp = !settings.headingUp; saveSettings(); renderOrient();
@@ -956,7 +1009,7 @@ $('psContinue').addEventListener('click', () => { $('pauseSheet').classList.add(
 $('openProjects').addEventListener('click', () => { renderProjects(); show('projects'); });
 $('projBack').addEventListener('click', () => { renderHome(); show('home'); });
 $('openSettings').addEventListener('click', () => {
-  $('stWa').value = settings.waText || '';
+  $('stWa').value = settings.waText || ''; $('stHome').value = settings.homeAddr || '';
   $('stVoice').checked = settings.voice; $('stSim').checked = settings.sim; $('stSimSpeed').value = String(settings.simSpeed || 1);
   const g = S.g;
   $('stInfo').textContent = `${settings.city}: ${g.reqEdges.length} קטעי רחוב, ${km(g.totalReqLen)} ק״מ לכיסוי` + (g.edges.some((e) => e.unreachable) ? ` (${g.edges.filter((e) => e.unreachable).length} קטעים מנותקים לא נכללו)` : '');
@@ -965,6 +1018,7 @@ $('openSettings').addEventListener('click', () => {
 $('stVoice').addEventListener('change', (e) => { settings.voice = e.target.checked; saveSettings(); $('muteBtn').classList.toggle('off', !settings.voice); });
 $('stSim').addEventListener('change', (e) => { settings.sim = e.target.checked; saveSettings(); });
 $('stWa').addEventListener('input', (e) => { settings.waText = e.target.value; saveSettings(); });
+$('stHome').addEventListener('change', (e) => { settings.homeAddr = e.target.value.trim(); delete settings.homeLL; saveSettings(); });
 $('stSimSpeed').addEventListener('change', (e) => { settings.simSpeed = +e.target.value; saveSettings(); });
 $('stClose').addEventListener('click', () => { $('settingsSheet').classList.add('hidden'); renderHome(); });
 $('stReload').addEventListener('click', () => { S.forceDownload = true; $('settingsSheet').classList.add('hidden'); $('cityInput').value = settings.city; show('setup'); $('loadCityBtn').click(); });

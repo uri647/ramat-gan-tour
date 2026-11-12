@@ -109,6 +109,9 @@
     <button class="icon-btn float" id="muteBtn" aria-label="השתק הוראות קוליות">
       <svg id="muteIcon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M11 5L6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg>
     </button>
+    <button class="icon-btn float" id="homeBtn" aria-label="כסה רחובות בדרך הביתה">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z" fill="none"/></svg>
+    </button>
     <button class="icon-btn float" id="blockedBtn" aria-label="הרחוב הבא חסום, דלג עליו">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#DC2626" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg>
     </button>
@@ -266,6 +269,9 @@
     <label class="toggle-row"><span>מצב ניסיון (נסיעה מדומה, בלי GPS)</span><input type="checkbox" id="stSim"><span class="switch" aria-hidden="true"></span></label>
     <label class="field">מהירות בנסיעה מדומה
       <select id="stSimSpeed"><option value="1">רגילה (30 קמ״ש)</option><option value="3">מהירה ×3</option></select>
+    </label>
+    <label class="field">כתובת הבית (לכפתור "הביתה")
+      <input id="stHome" type="text">
     </label>
     <label class="field">הודעת וואטסאפ (נפתחת מוכנה לשליחה)
       <textarea id="stWa" rows="7"></textarea>
