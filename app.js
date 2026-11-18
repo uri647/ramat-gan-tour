@@ -416,6 +416,32 @@ $('areaSheet').addEventListener('click', (ev) => {
   } else { const h = S.hoods[+b.dataset.hood]; setFocus({ type: 'hood', name: h.name, ids: h.ids }); }
 });
 
+$('focusChip').addEventListener('click', () => setFocus(null));
+// when far from the chosen neighbourhood, ask once per drive
+function checkFocusDistance(x, y) {
+  if (!S.focus || S.focusAsked) return; S.focusAsked = true;
+  let bd = Infinity; for (const id of S.focus.ids) { const p = S.g.edges[id].pts[0]; bd = Math.min(bd, Math.hypot(p[0] - x, p[1] - y)); }
+  if (bd < 700) return;
+  $('faText').textContent = `אתה במרחק ${fmtDist(bd)} מ${S.focus.name}. במה להתמקד?`;
+  $('focusAsk').classList.remove('hidden');
+}
+$('faHere').addEventListener('click', () => {
+  $('focusAsk').classList.add('hidden');
+  if (!S.lastFix) return;
+  // the neighbourhood you are in, or ~800 m around you
+  const [x, y] = [S.lastFix.x, S.lastFix.y];
+  let hood = null, bd = Infinity;
+  for (const h of S.hoods || []) for (const id of h.ids) { const p = S.g.edges[id].pts[0]; const d = Math.hypot(p[0] - x, p[1] - y); if (d < bd) { bd = d; hood = h; } }
+  if (hood && bd < 250) setFocus({ type: 'hood', name: hood.name, ids: hood.ids });
+  else {
+    const R = 800, ids = new Set(); for (const e of S.g.reqEdges) { const p = e.pts[Math.floor(e.pts.length / 2)]; if (Math.hypot(p[0] - x, p[1] - y) < R) ids.add(e.id); }
+    const ll = S.g.proj.toLL(x, y), dl = R / 110540, dn = R / (111320 * Math.cos(ll[0] * Math.PI / 180));
+    setFocus({ type: 'view', name: 'אזור שבחרת', poly: [[ll[0] + dl, ll[1] - dn], [ll[0] + dl, ll[1] + dn], [ll[0] - dl, ll[1] + dn], [ll[0] - dl, ll[1] - dn]], ids });
+  }
+});
+$('faAll').addEventListener('click', () => { $('focusAsk').classList.add('hidden'); setFocus(null); });
+$('faKeep').addEventListener('click', () => $('focusAsk').classList.add('hidden'));
+
 // ================= drive toward home =================
 async function getHome() {
   const addr = settings.homeAddr || '';
@@ -514,7 +540,7 @@ function unlockVoice() { if ('speechSynthesis' in window) { try { const u = new 
 // ================= navigation =================
 async function startNav(mode) {
   show('nav'); initMap(); unlockVoice();
-  S.mode = mode; S.steps = []; S.maneuvers = []; S.lastEdge = -1; S.announced = {}; S.follow = true; S.checkedFar = false; S.offCount = 0;
+  S.mode = mode; S.steps = []; S.maneuvers = []; S.lastEdge = -1; S.announced = {}; S.follow = true; S.checkedFar = false; S.offCount = 0; S.focusAsked = false;
   S.matcher = new C.Matcher(S.g, S.cov);
   if (mode === 'toPoint' && S.progress.pause) {
     const p = S.progress.pause;
@@ -587,6 +613,7 @@ function onFix(lat, lon, acc, headingDeg, speed) {
   }
   if (S.offGraph) { S.offGraph = false; showWaze(null); S.lastEdge = -1; }
   S.offCount = 0;
+  checkFocusDistance(x, y);
 
   if (S.mode === 'toPoint' && S.target) {
     const [tx, ty] = g.proj.toXY(S.target.lat, S.target.lon);
@@ -777,6 +804,7 @@ function renderNavStats() {
   const d = dayStats();
   const pct = S.focus ? focusPct(S.focus.ids) : Math.floor(S.cov.coveredLen() / S.g.totalReqLen * 1000) / 10;
   $('navPctLabel').textContent = S.focus ? S.focus.name : 'כל העיר';
+  const fc = $('focusChip'); fc.textContent = S.focus ? `מתמקד ב${S.focus.name}  ✕` : ''; fc.classList.toggle('hidden', !S.focus);
   $('navToday').textContent = `${km(d.m)} ק״מ · ${d.streets} רחובות`;
   $('navPct').textContent = pct.toFixed(pct < 10 ? 1 : 0) + '%';
   $('navBar').style.width = pct + '%';
