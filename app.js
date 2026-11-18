@@ -149,9 +149,9 @@ function renderHome() {
   const d = S.progress.days[today()];
   $('todayText').textContent = d && d.m > 0 ? `${km(d.m)} ק״מ · ${d.streets} קטעי רחוב חדשים · ${d.projects} פרויקטים` : 'עוד לא נסעת היום';
   const p = S.progress.pause;
-  $('pauseLine').textContent = p ? `עצרת ב${p.label}` : '';
+  $('pauseLine').textContent = [p ? `עצרת ב${p.label}` : '', S.focus ? `מתמקד ב${S.focus.name}` : ''].filter(Boolean).join(' · ');
   $('resumeLabel').textContent = p ? 'המשך סיור' : (done > 0 ? 'המשך סיור' : 'התחל סיור');
-  $('nearestBtn').classList.toggle('hidden', !p);
+  $('nearestBtn').classList.toggle('hidden', !p && !S.focus);
 }
 
 // ================= map =================
@@ -336,6 +336,29 @@ $('pcEdit').addEventListener('click', () => {
   $('projectSheet').classList.remove('hidden'); S.editIndex = i;
 });
 
+// ================= automatic area switch =================
+async function maybeSwitchArea(lat, lon) {
+  if (S.switching || (S.lastAreaTry && Date.now() - S.lastAreaTry < 60000)) return;
+  S.switching = true; S.lastAreaTry = Date.now();
+  try {
+    const m = await prebuiltList();
+    // smaller areas first (Kfar Ganim before Petah Tikva) would be confusing: prefer whole cities
+    const cities = Object.keys(m).filter((c) => c !== settings.city).sort((a, b) => a.includes('(') - b.includes('('));
+    for (const city of cities) {
+      let d = null; try { d = await idb.get('graph:' + city); } catch {}
+      if (!d) { try { d = await (await fetch('data/' + m[city])).json(); await idb.set('graph:' + city, d); } catch { continue; } }
+      const g2 = C.deserializeGraph(d); const [x2, y2] = g2.proj.toXY(lat, lon);
+      if (C.nearestEdgeDistance(g2, x2, y2, 240) < 80) {
+        saveProgress(true); stopNav();
+        await openArea(city);
+        toast(`עברתי לאזור ${city}`, 3500);
+        startNav('cover');
+        return;
+      }
+    }
+  } finally { S.switching = false; }
+}
+
 // ================= neighbourhood focus =================
 function computeHoods() {
   const g = S.g, places = (g.places || []).map((p) => { const [x, y] = g.proj.toXY(p.lat, p.lon); return { name: p.name, x, y, ids: new Set() }; });
@@ -491,7 +514,7 @@ function unlockVoice() { if ('speechSynthesis' in window) { try { const u = new 
 // ================= navigation =================
 async function startNav(mode) {
   show('nav'); initMap(); unlockVoice();
-  S.mode = mode; S.steps = []; S.maneuvers = []; S.lastEdge = -1; S.announced = {}; S.follow = true;
+  S.mode = mode; S.steps = []; S.maneuvers = []; S.lastEdge = -1; S.announced = {}; S.follow = true; S.checkedFar = false; S.offCount = 0;
   S.matcher = new C.Matcher(S.g, S.cov);
   if (mode === 'toPoint' && S.progress.pause) {
     const p = S.progress.pause;
@@ -553,6 +576,8 @@ function onFix(lat, lon, acc, headingDeg, speed) {
 
   if (!r.match) {
     S.offGraph = true;
+    S.offCount = (S.offCount || 0) + 1;
+    if (S.offCount >= 2) maybeSwitchArea(lat, lon);
     const tgt = offGraphTarget();
     setBanner('gray', '', tgt ? `אתה מחוץ לאזור הסיור. סע ל${tgt.label}` : 'אתה מחוץ לאזור הסיור');
     showWaze(tgt);
@@ -561,7 +586,18 @@ function onFix(lat, lon, acc, headingDeg, speed) {
     return;
   }
   if (S.offGraph) { S.offGraph = false; showWaze(null); S.lastEdge = -1; }
+  S.offCount = 0;
 
+  if (S.mode === 'toPoint' && S.target) {
+    const [tx, ty] = g.proj.toXY(S.target.lat, S.target.lon);
+    if (!S.checkedFar) {
+      S.checkedFar = true;
+      if (Math.hypot(x - tx, y - ty) > 1000) { // far from yesterday's stop: just continue from where you are
+        S.mode = 'cover'; S.target = null; setFlag(null); $('legendPlan').style.background = COLORS.plan; S.lastEdge = -1;
+        toast('אתה רחוק מנקודת העצירה, ממשיך מהרחוב הקרוב אליך', 3500);
+      }
+    }
+  }
   if (S.mode === 'toPoint' && S.target) {
     const [tx, ty] = g.proj.toXY(S.target.lat, S.target.lon);
     if (Math.hypot(x - tx, y - ty) < 35) {
@@ -1063,7 +1099,7 @@ $('loadCityBtn').addEventListener('click', async () => {
   } finally { btn.disabled = false; }
 });
 $('resumeBtn').addEventListener('click', () => startNav(S.progress.pause ? 'toPoint' : 'cover'));
-$('nearestBtn').addEventListener('click', () => startNav('cover'));
+$('nearestBtn').addEventListener('click', () => { if (S.focus) { const n = S.focus.name; setFocus(null, true); toast(`ביטלתי את המיקוד ב${n}, ממשיך מהרחוב הקרוב אליך`, 3500); } startNav('cover'); });
 $('pauseBtn').addEventListener('click', pauseHere);
 $('foundBtn').addEventListener('click', openProject);
 $('blockedBtn').addEventListener('click', skipNext);
