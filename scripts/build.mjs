@@ -3,6 +3,7 @@
 // Source: OpenStreetMap main API (tiles of the city's bounding box) + Nominatim for the city boundary.
 import { cpSync, mkdirSync, writeFileSync, rmSync, readdirSync } from 'node:fs';
 import { buildGraph, serializeGraph, HIGHWAY_RE } from '../core.js';
+import { simulate, stats, VARIANTS } from './audit.mjs';
 
 const CITIES = [
   { name: 'רמת גן', areas: ['Ramat Gan, Israel'], file: 'ramat-gan.json' },
@@ -147,6 +148,10 @@ for (const city of CITIES) {
     const names = [...new Set(g.reqEdges.map((e) => e.name).filter(Boolean))];
     console.log(`  neighbourhoods (${(g.places || []).length}): ${(g.places || []).map((p) => p.name).join(', ')}`);
     console.log(`  streets (${names.length}): ${names.slice(0, 40).join(', ')}`);
+    try {
+      console.log('  audit stats', JSON.stringify(stats(g)));
+      for (const [k, v] of Object.entries(VARIANTS)) console.log(`  audit ${k}`, JSON.stringify(simulate(g, v)));
+    } catch (e) { console.log('  audit failed', e.message); }
     console.log(`  ok: ${g.reqEdges.length} street segments, ${(g.totalReqLen / 1000).toFixed(0)} km, ${g.edges.filter((e) => e.unreachable).length} unreachable`);
   } catch (e) {
     console.log('  skipped', city.name, '-', e.message || e, '(the app will download it on the phone instead)');
