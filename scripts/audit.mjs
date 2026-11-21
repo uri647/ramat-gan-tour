@@ -29,7 +29,7 @@ export function simulate(g, variant = {}, maxMs = 25000) {
       }
       const isNew = e.req && !e.unreachable && !e.skip && !cov.covered[e.id];
       driven += e.len;
-      if (isNew) { cov.setCovered(e.id); cov.takeTwinNewly(); maxDead = Math.max(maxDead, curDead); curDead = 0; }
+      if (isNew) { cov.setCovered(e.id); cov.takeTwinNewly(); if (!variant.noAbsorb) cov.absorbShort(e.id); maxDead = Math.max(maxDead, curDead); curDead = 0; }
       else { dead += e.len; curDead += e.len; }
       inDir = arcDir(e, st.fwd, true); node = st.fwd ? e.b : e.a; prevE = st.e;
     }
@@ -53,6 +53,7 @@ export function stats(g) {
 // candidate planner tweaks to compare
 export const VARIANTS = {
   current: {},
+  noAbsorb: { noAbsorb: true },
   // prefer targets inside clusters of uncovered streets (finish a block before leaving)
   cluster: { bias: (g, cov) => (n) => {
     let k = 0; const N = g.nodes[n];

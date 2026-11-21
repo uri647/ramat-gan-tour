@@ -119,6 +119,8 @@ export function finalizeGraph(g) {
     if (e.dir <= 0) out[e.b].push({ e: e.id, fwd: false, to: e.a });
   }
   g.out = out;
+  g.adj = Array.from({ length: N }, () => []);
+  for (const e of g.edges) { g.adj[e.a].push(e.id); if (e.b !== e.a) g.adj[e.b].push(e.id); }
   // strongly connected components (iterative Tarjan)
   const index = new Int32Array(N).fill(-1), low = new Int32Array(N), onStack = new Uint8Array(N), comp = new Int32Array(N).fill(-1);
   const stack = []; let idx = 0, nComp = 0;
@@ -318,6 +320,20 @@ export class Coverage {
     for (const i of ids) { this.covered[i] = 0; this.bins.delete(i); }
     return ids;
   }
+  /** Short stubs (<25 m) between two driven streets are seen in passing: count them as driven. */
+  absorbShort(id) {
+    const g = this.g, e = g.edges[id], out = [];
+    if (!g.out) return out;
+    for (const node of [e.a, e.b]) {
+      for (const sid of (g.adj[node] || [])) {
+        if (sid === id || this.covered[sid]) continue;
+        const s = g.edges[sid]; if (!s.req || s.len >= 25) continue;
+        const other = s.a === node ? s.b : s.a;
+        if ((g.adj[other] || []).some((x) => x !== sid && this.covered[x])) { this.covered[sid] = 1; this.bins.delete(sid); out.push(sid); }
+      }
+    }
+    return out;
+  }
   setCovered(id) { if (!this.covered[id]) this.shadowTwins(id, 0, this.g.edges[id].len); this.covered[id] = 1; this.bins.delete(id); }
   keys() { const out = []; for (const e of this.g.edges) if (this.covered[e.id]) out.push(e.key); return out; }
   loadKeys(keys) { const s = new Set(keys); for (const e of this.g.edges) if (s.has(e.key)) this.covered[e.id] = 1; }
@@ -375,6 +391,7 @@ export class Matcher {
       }
       if (this.cov.markRange(best.e, p0, best.pos)) newly.push(best.e);
       for (const t of this.cov.takeTwinNewly()) newly.push(t);
+      for (const id of newly.slice()) for (const t of this.cov.absorbShort(id)) newly.push(t);
       this.last = { e: best.e, pos: best.pos, fwd, d: best.d, qx: best.qx, qy: best.qy, segDir: best.segDir };
     } else {
       this.last = null;
@@ -486,7 +503,7 @@ export function nextTarget(g, cov, sources, extraDone, bias, allowed) {
       const endNode = arc.to;
       let pending = 0;
       for (const a2 of g.out[endNode]) { const e2 = g.edges[a2.e]; if (e2.req && !e2.skip && !cov.covered[e2.id] && a2.e !== e.id && !(extraDone && extraDone.has(a2.e))) pending++; }
-      if (pending === 0) score -= 15;
+      if (pending === 0) score -= 90; // finish straggler streets before moving on (audit: shorter empty drives)
       if (bias) score += bias(endNode);
       if (score < bestScore) { bestScore = score; best = { node: u, arc }; stopAt = du + (bias ? 700 : 60); }
     }
