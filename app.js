@@ -727,7 +727,8 @@ function replan() {
   if (S.mode === 'cover') {
     let best = null;
     for (const s of src) {
-      const p = C.planAhead(g, S.cov, [s], 2500, 80, homeBias(), S.focus ? S.focus.ids : null);
+      const hb = homeBias(), ab = C.areaBias(g, S.cov);
+      const p = C.planAhead(g, S.cov, [s], 2500, 80, hb ? (n) => hb(n) + ab(n) : ab, S.focus ? S.focus.ids : null);
       // score: distance until first new coverage
       let toFirst = s.dist; for (const st of p) { if (st.target) break; toFirst += g.edges[st.e].len; }
       const curUncovered = !S.cov.covered[s.cur.e] && g.edges[s.cur.e].req && !g.edges[s.cur.e].skip;

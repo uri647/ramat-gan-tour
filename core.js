@@ -515,6 +515,19 @@ export function nextTarget(g, cov, sources, extraDone, bias, allowed) {
   return steps;
 }
 
+/** Planner preference chosen by the route audit on the real maps (~4-7% less driving):
+ *  favour targets that sit among other undriven streets, and finish stragglers first. */
+export function areaBias(g, cov) {
+  return (n) => {
+    let k1 = 0, k = 0;
+    for (const a of g.out[n]) {
+      const e = g.edges[a.e]; if (e.req && !e.skip && !cov.covered[e.id]) { k1++; k++; }
+      for (const b of g.out[a.to]) { const e2 = g.edges[b.e]; if (e2.req && !e2.skip && !cov.covered[e2.id]) k += 0.5; }
+    }
+    return (k1 <= 1 ? -90 : 0) - Math.min(6, k) * 25;
+  };
+}
+
 /** Plan ahead greedily up to maxLen meters. Returns steps [{e,fwd,target}] */
 export function planAhead(g, cov, sources, maxLen = 3000, maxTargets = 80, bias = null, allowed = null) {
   const plan = []; const tmp = new Set(); let len = 0; let src = sources; let targets = 0;

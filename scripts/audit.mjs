@@ -1,6 +1,6 @@
 // Simulates driving a whole area with the coverage planner and reports how efficient the route is.
 // Runs during the Vercel build (real street data) and prints to the build log.
-import { Coverage, nextTarget, turnDeg } from '../core.js';
+import { Coverage, nextTarget, turnDeg, areaBias } from '../core.js';
 
 function arcDir(e, fwd, end) {
   const p = e.pts, n = p.length;
@@ -52,7 +52,8 @@ export function stats(g) {
 
 // candidate planner tweaks to compare
 export const VARIANTS = {
-  current: {},
+  current: { bias: (g, cov) => areaBias(g, cov) },
+  previous: {},
   noAbsorb: { noAbsorb: true },
   // prefer targets inside clusters of uncovered streets (finish a block before leaving)
   cluster: { bias: (g, cov) => (n) => {
